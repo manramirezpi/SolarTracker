@@ -53,3 +53,14 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# Carpetas de compilación de CubeIDE
+Debug/
+Release/
+
+# Configuración local del IDE (específica de tu PC)
+.settings/
+*.launch
+
+# Carpeta de metadatos de Eclipse/CubeIDE
+.metadata/
