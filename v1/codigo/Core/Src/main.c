@@ -56,8 +56,6 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-ADC_HandleTypeDef hadc1;
-
 I2C_HandleTypeDef hi2c1;
 
 TIM_HandleTypeDef htim1;
@@ -242,12 +240,6 @@ static char *commandParameters[5]; // arreglo que guarda los parametros que vien
 uint16_t last_pwm_azimut = 150;
 uint16_t last_pwm_elevacion = 150;
 
-//ADC:
-volatile uint32_t valorADC = 0;
-uint8_t conversionCompletada = 0; // Bandera para saber cuando hay dato nuevo
-float corrientePanel = 0.0f;
-float corrienteSuma = 0.0f;
-uint16_t contadorSumas = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -260,7 +252,6 @@ static void MX_TIM11_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_TIM1_Init(void);
-static void MX_ADC1_Init(void);
 /* USER CODE BEGIN PFP */
 void Procesar_Trama_GPRMC(char *buffer);
 void Procesar_Tiempo_GPS(void);
@@ -318,7 +309,6 @@ int main(void)
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
   MX_TIM1_Init();
-  MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
   __HAL_DMA_DISABLE_IT(&hdma_usart2_rx, DMA_IT_HT);
   HAL_Delay(50);
@@ -349,31 +339,6 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-/*
-	    if ((anchoAzimut>=400)&&(anchoAzimut<=3000)){
-	    	__HAL_TIM_SET_COMPARE(&htim11, TIM_CHANNEL_1,anchoAzimut);}
-	    		// ancho entre 0 y 2000, para controlar en todo el rango el
-	    // servo: entre 57 y 269
-
-	     if ((anchoElevacion>=400)&&(anchoElevacion<=3000)){
-	    __HAL_TIM_SET_COMPARE(&htim10, TIM_C (aunque no es estrictamente necesario si ya leímosHANNEL_1, anchoElevacion);}
-
-*/
-	  if(conversionCompletada){
-		  if(contadorSumas >= 500){
-			  //corrientePanel = (valorADC*0.00244140625)-5;
-			  corrientePanel = ((corrienteSuma/500)*0.00244140625)-5;
-			  corrientePanel = corrientePanel*1000;
-		  	  contadorSumas = 0;
-		  	  conversionCompletada = 0;
-		  	  corrienteSuma = 0;
-		  	  HAL_ADC_Start_IT(&hadc1);}
-		  else {
-			  corrienteSuma = corrienteSuma + valorADC;
-			  contadorSumas ++;
-			  HAL_ADC_Start_IT(&hadc1);
-			  conversionCompletada = 0;}}
-
 	    if (flag_gps == 1) {
 	      flag_gps = 0; // Reset bandera
 
@@ -455,58 +420,6 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-}
-
-/**
-  * @brief ADC1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_ADC1_Init(void)
-{
-
-  /* USER CODE BEGIN ADC1_Init 0 */
-
-  /* USER CODE END ADC1_Init 0 */
-
-  ADC_ChannelConfTypeDef sConfig = {0};
-
-  /* USER CODE BEGIN ADC1_Init 1 */
-
-  /* USER CODE END ADC1_Init 1 */
-
-  /** Configure the global features of the ADC (Clock, Resolution, Data Alignment and number of conversion)
-  */
-  hadc1.Instance = ADC1;
-  hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;
-  hadc1.Init.Resolution = ADC_RESOLUTION_12B;
-  hadc1.Init.ScanConvMode = DISABLE;
-  hadc1.Init.ContinuousConvMode = DISABLE;
-  hadc1.Init.DiscontinuousConvMode = DISABLE;
-  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
-  hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
-  hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
-  hadc1.Init.NbrOfConversion = 1;
-  hadc1.Init.DMAContinuousRequests = DISABLE;
-  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
-  if (HAL_ADC_Init(&hadc1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
-  */
-  sConfig.Channel = ADC_CHANNEL_0;
-  sConfig.Rank = 1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_144CYCLES;
-  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN ADC1_Init 2 */
-  HAL_ADC_Start_IT(&hadc1);
-  /* USER CODE END ADC1_Init 2 */
-
 }
 
 /**
@@ -1593,29 +1506,6 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
     // Limpiamos el error y reiniciamos la recepción forzosamente
     HAL_UART_Receive_IT(&huart1, &rx_byte, 1);
   }
-}
-
-void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc){
-if (hadc->Instance == ADC1){// Verificamos que sea el ADC1 quien llamó
-        valorADC = HAL_ADC_GetValue(hadc);//valor crudo entre 0 y 4096
-        conversionCompletada = 1;} // Avisamos al main que ya tenemos dato
-}
-
-void HAL_ADC_ErrorCallback(ADC_HandleTypeDef *hadc)
-{
-    if (hadc->Instance == ADC1)
-    {
-        // 1. Detenemos el ADC para limpiar estados erróneos
-        HAL_ADC_Stop_IT(hadc);
-
-        // 2. Limpiamos explícitamente la bandera de Overrun (OVR)
-        __HAL_ADC_CLEAR_FLAG(hadc, ADC_FLAG_OVR);
-
-        // 3. Opcional: Podrías reiniciar el ADC aquí mismo,
-        // pero es más seguro levantar una bandera para que el main lo reinicie.
-        // O simplemente reiniciarlo si tu lógica lo permite:
-        HAL_ADC_Start_IT(hadc);
-    }
 }
 
 /* USER CODE END 4 */
