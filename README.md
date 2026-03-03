@@ -1,7 +1,5 @@
-# SolarTracker
+# SolarTracker v1.0
 Astronomical solar tracker - STM32 &amp; ESP32 versions
-
-# Seguidor Solar Astronómico v1.0
 
 ## Descripción General
 Este proyecto consiste en un sistema de seguimiento solar de alta precisión basado en el microcontrolador **STM32**. A diferencia de los seguidores solares convencionales que utilizan fotorresistencias (LDR), este sistema emplea un **algoritmo de posicionamiento astronómico** para calcular la ubicación exacta del sol (Azimut y Elevación) en tiempo real.
