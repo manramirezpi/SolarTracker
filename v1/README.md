@@ -10,7 +10,7 @@ El sistema utiliza datos de posición y tiempo global obtenidos mediante un mód
 - **Geolocalización automática:** Integración con GPS (protocolo NMEA $GPRMC) para obtener latitud, longitud y tiempo UTC sin intervención del usuario.
 - **Control de doble eje:** Gestión de movimientos de Azimut y Elevación mediante servomotores controlados por PWM (TIM10 y TIM11).
 - **Interfaz de comando (CLI):** Sistema robusto de control mediante consola serie (USART con DMA) que permite:
-    - Consultar datos de sensores y cálculos.
+    - Consultar datos de cálculos.
     - Forzar coordenadas y fechas manualmente.
     - Ajustar la velocidad de simulación para pruebas de laboratorio.
 - **Lógica de "Back-flip":** Algoritmo inteligente que gestiona los límites mecánicos de los servos (180°), invirtiendo la posición cuando el sol se encuentra fuera del rango físico del actuador.
@@ -29,14 +29,13 @@ El firmware está estructurado sobre la capa de abstracción de hardware (HAL) d
 - **Periféricos:** 
     - UART1 (GPS) / UART2 (Consola/Debug).
     - I2C1 (Display LCD).
-    - ADC1 (Sensor de corriente).
     - TIM1 (Base de tiempo), TIM10/11 (PWM Servos).
 
 ## Especificaciones de seguimiento (v1.0)
 El sistema está diseñado para ofrecer una **cobertura hemisférica completa**, optimizando la posición del panel sin importar la ubicación geográfica del usuario:
 
 *   **Rango de Elevación:** $0^\circ$ a $90^\circ$. 
-    *   Calculado desde la horizontal (horizonte) hasta la vertical absoluta (cenit). El algoritmo detecta elevaciones negativas (noche), en cuyo caso el sistema entra en modo de espera.
+    *   Calculado desde la horizontal (horizonte) hasta la vertical absoluta (cenit). El algoritmo detecta elevaciones negativas (noche), en cuyo caso el sistema restringe su movimiento en esta         componente.
 *   **Rango de Azimut:** $0^\circ$ a $360^\circ$. 
     *   Cobertura circular completa. El sistema rastrea el sol desde el Norte ($0^\circ$), pasando por el Este ($90^\circ$), Sur ($180^\circ$) y Oeste ($270^\circ$).
 *   **Resolución de Cálculo:** Doble precisión (`double`) para coordenadas astronómicas, permitiendo un error de cálculo despreciable frente a la resolución mecánica de los actuadores.
@@ -45,7 +44,7 @@ El sistema está diseñado para ofrecer una **cobertura hemisférica completa**,
 Para solucionar la limitación física de los servomotores estándar (cuyo rango suele ser de $180^\circ$), el firmware implementa una **estrategia de inversión inteligente**:
 *   **Modo Estándar:** Cuando el sol se encuentra en el sector Sur (entre $90^\circ$ y $270^\circ$ de Azimut), el seguidor apunta de forma directa.
 *   **Modo Back-flip:** Si el sol transita por el sector Norte (fuera del rango mecánico del servo de azimut), el sistema rota la base $180^\circ$ en sentido opuesto e invierte el ángulo de elevación (suplementario). 
-*   **Resultado:** Se logra un seguimiento efectivo de **360° de Azimut** utilizando hardware limitado a $180^\circ$, evitando el enredo de cables y maximizando la simplicidad mecánica.
+*   **Resultado:** Se logra un seguimiento efectivo de **360° de Azimut** utilizando hardware limitado a $180^\circ$, maximizando la simplicidad mecánica.
 
 ## Estado del Proyecto
 Actualmente, esta **Versión 1.0** se encuentra en estado **Estable y Funcional**. Representa la base de control astronómico y mecánico del sistema, habiendo cumplido con los objetivos de diseño principales:
