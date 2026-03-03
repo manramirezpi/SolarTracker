@@ -32,14 +32,34 @@ El firmware está estructurado sobre la capa de abstracción de hardware (HAL) d
     - I2C1 (Display LCD).
     - ADC1 (Sensor de corriente).
     - TIM1 (Base de tiempo), TIM10/11 (PWM Servos).
-- **Rango de Operación:** Latitud/Longitud global; Elevación de 0° a 90°.
+
+## Especificaciones de seguimiento (v1.0)
+El sistema está diseñado para ofrecer una **cobertura hemisférica completa**, optimizando la posición del panel sin importar la ubicación geográfica del usuario:
+
+*   **Rango de Elevación:** $0^\circ$ a $90^\circ$. 
+    *   Calculado desde la horizontal (horizonte) hasta la vertical absoluta (cenit). El algoritmo detecta elevaciones negativas (noche), en cuyo caso el sistema entra en modo de espera.
+*   **Rango de Azimut:** $0^\circ$ a $360^\circ$. 
+    *   Cobertura circular completa. El sistema rastrea el sol desde el Norte ($0^\circ$), pasando por el Este ($90^\circ$), Sur ($180^\circ$) y Oeste ($270^\circ$).
+*   **Resolución de Cálculo:** Doble precisión (`double`) para coordenadas astronómicas, permitiendo un error de cálculo despreciable frente a la resolución mecánica de los actuadores.
+
+## Lógica de Control Dinámico (Back-flip)
+Para solucionar la limitación física de los servomotores estándar (cuyo rango suele ser de $180^\circ$), el firmware implementa una **estrategia de inversión inteligente**:
+*   **Modo Estándar:** Cuando el sol se encuentra en el sector Sur (entre $90^\circ$ y $270^\circ$ de Azimut), el seguidor apunta de forma directa.
+*   **Modo Back-flip:** Si el sol transita por el sector Norte (fuera del rango mecánico del servo de azimut), el sistema rota la base $180^\circ$ en sentido opuesto e invierte el ángulo de elevación (suplementario). 
+*   **Resultado:** Se logra un seguimiento efectivo de **360° de Azimut** utilizando hardware limitado a $180^\circ$, evitando el enredo de cables y maximizando la simplicidad mecánica.
 
 ## Estado del Proyecto
-Actualmente, el proyecto se encuentra en su **versión 1.0 funcional**. 
-- [x] Implementación completa del algoritmo solar.
-- [x] Gestión de comandos vía UART con DMA.
-- [x] Control de servos con lógica de inversión.
+Actualmente, esta **Versión 1.0** se encuentra en estado **Estable y Funcional**. Representa la base de control astronómico y mecánico del sistema, habiendo cumplido con los objetivos de diseño principales:
+*   **Precisión Astronómica:** Implementación exitosa del algoritmo de posicionamiento solar con corrección por geolocalización GPS.
+*   **Arquitectura No Bloqueante:** Gestión de periféricos (UART, ADC) mediante **DMA** para garantizar la integridad de los tiempos de ciclo del microcontrolador.
+*   **Robustez Mecánica:** Control de doble eje mediante lógica de inversión (*Back-flip*) para superar limitaciones físicas de los actuadores.
+*   **Monitoreo Local:** Visualización de parámetros y gestión de comandos en tiempo real a través de interfaz física (LCD) y consola serie (CLI).
 
+## Perspectivas de Evolución
+La arquitectura Lógica de este sistema permite proyectar el desarrollo hacia una segunda etapa de optimización y conectividad, buscando llevar la plataforma hacia un entorno **Smart Energy**:
+
+*   **Telemetría y Análisis Energético:** Desarrollo de algoritmos para el cálculo de potencia generada y la implementación de sistemas de comparación de promedios históricos para evaluar la degradación o suciedad de los paneles.
+*   **Transición a Interfaz IoT:** Migración de la visualización local hacia un ecosistema inalámbrico, sustituyendo la pantalla física por una comunicación bidireccional con aplicaciones móviles o tableros de control en la nube.
+*   **Gestión Remota Ubicua:** Sustitución del control por comandos serie por una interfaz de usuario integrada en una App, permitiendo el mando, configuración y supervisión del seguidor desde cualquier ubicación vía IoT.
 ---
-
 **Nota:** *Este software se proporciona "tal cual" bajo los términos de licencia de STMicroelectronics y está diseñado para aplicaciones de energía renovable y educación técnica.*
