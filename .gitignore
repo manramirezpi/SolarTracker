@@ -1,66 +1,55 @@
-# Prerequisites
-*.d
-
-# Object files
-*.o
-*.ko
-*.obj
+# ESP-IDF specific build outputs
+build/
+**/build/
+*.bin
 *.elf
-
-# Linker output
-*.ilk
 *.map
-*.exp
+flasher_args.json
+sdkconfig.old
 
-# Precompiled Headers
-*.gch
-*.pch
+# ESP-IDF dependencies
+managed_components/
+dependencies.lock
+.espressif/
 
-# Libraries
-*.lib
-*.a
-*.la
-*.lo
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+CTestTestfile.cmake
 
-# Shared objects (inc. Windows DLLs)
-*.dll
-*.so
-*.so.*
-*.dylib
+# Python environment files
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+venv/
+.venv/
+env/
 
-# Executables
-*.exe
-*.out
-*.app
-*.i*86
-*.x86_64
-*.hex
+# IDE & Language Servers
+.clangd/
+.ccls-cache/
+compile_commands.json
+.vscode/ipch/
+.vscode/.browse.vc.db
+.vscode/project_samples.json
 
-# Debug files
-*.dSYM/
-*.su
-*.idb
-*.pdb
-
-# Kernel Module Compile Results
-*.mod*
-*.cmd
-.tmp_versions/
-modules.order
-Module.symvers
-Mkfile.old
-dkms.conf
-
-# debug information files
-*.dwo
-
-# Carpetas de compilación de CubeIDE
+# Toolchain specific
 Debug/
 Release/
-
-# Configuración local del IDE (específica de tu PC)
 .settings/
 *.launch
-
-# Carpeta de metadatos de Eclipse/CubeIDE
 .metadata/
+
+# System & OS files
+.DS_Store
+.directory
+*~
+*.swp
+*.bak
+*.log
+Thumbs.db
+ehthumbs.db
+Desktop.ini
