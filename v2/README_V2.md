@@ -1,61 +1,73 @@
-# Seguidor Solar IoT - Versión 2.0 (Resiliencia y Monitoreo Avanzado)
+# Seguidor Solar IoT - Versión 2.0 (Salto Tecnológico y Resiliencia)
 
 ## 📝 Resumen del Proyecto
-Sistema industrial de seguimiento solar basado en **ESP32**, diseñado para maximizar la eficiencia de paneles fotovoltaicos mediante control astronómico dinámico. Esta versión 2.0 consolida un firmware de **alta disponibilidad**, capaz de operar de forma autónoma ante fallos de red o sensores, integrando un monitoreo de energía de grado científico.
+Esta versión 2.0 representa la evolución del sistema original basado en STM32 hacia una plataforma **IoT de alta disponibilidad** basada en el **ESP32**. El enfoque ha migrado de un control local y visualización física, a un entorno de monitoreo científico remoto, robustez ante fallos de red y una cinemática de precisión optimizada para la comparación de eficiencia energética.
 
 ---
 
-## 🛡️ Filosofía de Estabilidad y Resiliencia
+## 🔄 Evolución: De v1.0 (STM32) a v2.0 (ESP32)
 
-### 1. Conectividad Auto-Recuperable (WiFi & MQTT)
-*   **Triple Redundancia SSID:** El sistema rota automáticamente entre una red Principal y dos de Respaldo ante fallos de conexión.
-*   **Backoff Exponencial:** Secuencia de reintentos inteligente (2s a 64s) para evitar la saturación de los puntos de acceso.
-*   **Monitor de Estabilidad de Aplicación:** Si el enlace MQTT es inestable, el sistema fuerza un reinicio de la capa inalámbrica para garantizar la salida a Internet.
-*   **Protección Anti-Pánico (Watchdog):** Timeout de red MQTT fijado en **4s**, asegurando que un servidor caído no bloquee el hilo principal (Watchdog de 10s).
+Lo que en la v1.0 eran "Perspectivas de Evolución", en la v2.0 es ahora una realidad funcional:
 
-### 2. Integridad Sensórica y Operación Degradada
-*   **Modo Auto-Búsqueda I2C:** Si el bus se bloquea o el sensor INA3221 se desconecta, el sistema entra en búsqueda activa y se re-configura automáticamente al detectar el hardware de nuevo.
-*   **Autonomía GPS:** Ante la pérdida de satélites, utiliza la última ubicación válida conocida. Si arranca sin datos, inicia un **Escaneo Azimutal de 360°** para evitar quedar en una posición de sombra.
+| Característica | Versión 1.0 (STM32) | Versión 2.0 (ESP32 - Actual) |
+| :--- | :--- | :--- |
+| **Cerebro** | STM32F4 (100MHz) | ESP32 Dual-Core (240MHz) |
+| **Interfaz** | Local (LCD 20x4 + Consola Serial) | **Ubícua (App Móvil + Dashboard MQTT)** |
+| **Control** | Comandos por cable (UART) | **Mando inalámbrico bidireccional** |
+| **Monitoreo** | Teórico (Cálculo solar) | **Científico (INA3221 - mW reales)** |
+| **Resiliencia** | Protección básica | **Triple WiFi Redundante + Fail-over** |
+| **Cinemática** | Movimiento directo | **Silky Motion (Rampas + Histéresis 0.4°)** |
+| **Análisis** | No disponible | **Media Móvil 24h (Solo horas de sol)** |
 
 ---
 
-## 🚀 Características Cinéticas y Energéticas
+## 🛡️ Estabilidad y Resiliencia (Firmware de Grado Industrial)
 
-### 1. Movimiento "Silky Motion"
-*   **Rampas de Velocidad:** Limitado a **15°/s** para proteger la integridad mecánica.
-*   **Control de Jitter:** Histéresis de **0.4°** y redondeo PWM robótico para eliminar vibraciones en reposo.
-*   **Algoritmo Backflip:** Rotación inteligente de 180° para seguir al sol cruzando el Norte sin enredar el cableado.
+### 1. Conectividad Auto-Recuperable
+*   **Triple Redundancia SSID:** Gestión automática entre red Principal y dos de Respaldo.
+*   **Backoff Exponencial:** Estrategia de reintentos (2s a 64s) para proteger la salud de la red.
+*   **Safety Watchdog:** Timeouts de red coordinados (4s) para evitar bloqueos del sistema ante fallos del broker MQTT.
 
-### 2. Monitoreo INA3221 Optimizado
-*   **Configuración de Canales:** Canales 1 (Panel) y 2 (Sistema) activos (`0x6827`) para máxima velocidad de muestreo.
-*   **Media Móvil de Producción:** Buffer de 24 horas (288 bloques) que **excluye la noche**. Calcula el promedio diario basándose solo en las horas de sol real (>0.1 µW), ideal para comparar rendimiento entre paneles.
+### 2. Operación Degradada Elegante
+*   **Auto-Sanación I2C:** Detección y re-configuración en caliente del sensor de energía sin reinicio del sistema.
+*   **Inercia GPS:** Ante la pérdida de satélites, el sistema mantiene el seguimiento usando el último fix válido y su reloj interno sincronizado.
+
+---
+
+## 🚀 Innovaciones Energéticas y Cinéticas
+
+### 1. Sistema "Silky Motion"
+*   **Protección Mecánica:** Rampas de aceleración a **15°/s** que eliminan el estrés en los ejes.
+*   **Eliminación de Jitter:** Filtro de zona muerta de **0.4°** y redondeo PWM robótico para un reposo absoluto y silencioso.
+
+### 2. Análisis de Eficiencia Comparativa
+*   **Promediado Inteligente:** El sistema calcula la potencia media **excluyendo la noche**. Esto permite comparar directamente el rendimiento del panel móvil frente a uno estático sin que el valor de 0W nocturno sesgue el resultado.
+*   **Precisión Científica:** Reporte en milivatios (mW) con resolución de 6 decimales.
 
 ---
 
 ## 🛠 Especificaciones Técnicas
 
-### Asignación de Pines (GPIO)
-| Periférico | Pin ESP32 | Función |
-| :--- | :--- | :--- |
-| **Servo Azimut** | 19 | Salida PWM |
-| **Servo Elevación** | 18 | Salida PWM |
-| **GPS RX** | 17 | UART2 |
-| **I2C SDA / SCL** | 21 / 22 | Bus Sensores |
-
-### Parámetros de Operación
-*   **Frecuencia PWM:** 50 Hz
-*   **Resolución:** 16-bit LEDC
-*   **Zona Muerta:** 0.4°
-*   **Umbral de Producción:** 0.1 µW
+| Periférico | Pin ESP32 | Parámetro | Valor |
+| :--- | :--- | :--- | :--- |
+| **Azimut** | 19 | **Frecuencia PWM** | 50 Hz |
+| **Elevación** | 18 | **Resolución PWM** | 16 bits |
+| **GPS RX** | 17 | **Dead-band** | 0.4° |
+| **I2C Bus** | 21 / 22 | **Umbral Captura** | > 0.1 µW |
 
 ---
 
-## 📡 Comandos de Control (Tópico: `solar/sub`)
-| Comando | Rango | Efecto |
-| :--- | :--- | :--- |
-| `set_ser_az` | -90.1 a 90.1 | Ángulo físico de la base. |
-| `set_ser_el` | -0.1 a 180.1 | Ángulo físico de inclinación. |
-| `set_lat` | Decimal | Latitud manual (Sobrescribe GPS). |
-| `set_vel` | 1 a 1440 | Factor de velocidad para simulación. |
+## 📡 Protocolo de Control IoT (`solar/sub`)
+Respuesta robusta a comandos JSON: `set_ser_az`, `set_ser_el`, `set_lat`, `set_vel`. Incluye validación de rangos permisivos (+/- 90.1°) para asegurar la compatibilidad con cualquier deslizador de aplicación móvil.
 
-**Desarrollado para operación continua 24/7 con el ecosistema ESP-IDF v5.5.3.**
+**Firmware desarrollado sobre ESP-IDF v5.5.3, optimizado para pruebas de campo 24/7.**
+
+---
+
+## 🔮 Perspectivas de Evolución: Versión 3.0
+
+El mapa de ruta para la siguiente gran iteración se centra en la autonomía total y la movilidad del sistema:
+
+1.  **Actualización Inalámbrica (OTA - Over-The-Air):** Implementación de carga de firmware vía WiFi. Esto permitirá realizar mejoras y correcciones en la lógica de control sin necesidad de acceso físico al dispositivo, facilitando el mantenimiento en instalaciones remotas o de difícil acceso.
+2.  **Sistema de Referencia Dinámico (Fusión de Sensores IMU):** Integración de acelerómetro, giroscopio y magnetómetro (IMU). El objetivo es evolucionar el seguidor hacia una plataforma capaz de operar en **condiciones dinámicas** (ej. en vehículos o embarcaciones). El sistema compensará en tiempo real el balanceo y la orientación de la base para mantener el panel siempre apuntando al sol, independientemente del movimiento del soporte.
+3.  **Algoritmos de Auto-Calibración por Barrido de Potencia:** Utilizando la alta precisión del INA3221, el seguidor realizará breves escaneos de posición alrededor del objetivo óptimo. Esta técnica de "búsqueda de máximo" servirá para corregir automáticamente desviaciones sistémicas, como una base no perfectamente nivelada o errores en la alineación con el Norte geográfico, garantizando la máxima eficiencia real.
