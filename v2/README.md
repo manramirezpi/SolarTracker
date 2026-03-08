@@ -20,7 +20,7 @@ Lo que en la v1.0 eran perspectivas de evolución, en la v2.0 es una realidad fu
 - **Backoff exponencial:** Estrategia de reintentos con intervalos crecientes (2 s a 64 s) para proteger la salud de la red.
 - **Watchdog de sistema coordinado:** Timeouts de red coordinados (4 s) para evitar bloqueos del sistema ante fallos del broker MQTT, dimensionados por debajo del timeout del TWDT (10 s).
 - **Auto-sanación I2C:** Detección y reconfiguración en caliente del sensor de energía INA3221 sin reinicio del sistema.
-- **Inercia GPS:** Ante la pérdida de satélites, el sistema mantiene el seguimiento usando el último fix válido recuperado desde NVS (memoria no volátil).
+- **Inercia GPS:** Ante la pérdida de satélites, el sistema mantiene el seguimiento usando las últimas coordenadas válidas disponibles en RAM. Al arranque, si aún no hay señal GPS, se recuperan las coordenadas de la sesión anterior desde NVS (memoria no volátil).
 - **Sistema Silky Motion:** Rampas de aceleración limitadas a 15°/s y zona muerta de 0.4° para movimiento suave, silencioso y sin estrés mecánico.
 - **Análisis de eficiencia comparativa:** Media móvil de 24 horas con exclusión nocturna, para comparación objetiva entre panel móvil y panel estático sin sesgo por lecturas de 0 W.
 - **Control IoT bidireccional:** Protocolo MQTT (`solar/sub`) con comandos JSON para ajuste remoto de posición, coordenadas y velocidad de simulación.
@@ -30,7 +30,7 @@ Lo que en la v1.0 eran perspectivas de evolución, en la v2.0 es una realidad fu
 El firmware está estructurado sobre ESP-IDF v5.5.3 con arquitectura multitarea (FreeRTOS), destacando los siguientes módulos:
 
 1.  **Capa de conectividad:** Gestión WiFi con reconexión automática por backoff exponencial y rotación entre tres SSIDs de respaldo. Comunicación MQTT bidireccional con timeout de red coordinado al TWDT.
-2.  **Motor de procesamiento GPS:** Parseo de tramas NMEA ($GPRMC) con mecanismo de inercia: ante pérdida de señal, el sistema opera con el último fix valido. En caso de no tener aún, se usa el rescatado desde NVS.
+2.  **Motor de procesamiento GPS:** Parseo de tramas NMEA ($GPRMC) con mecanismo de inercia: ante pérdida de señal, el sistema opera con el último fix válido disponible en RAM. Si no hay fix previo en la sesión actual (arranque en frío), se utilizan las coordenadas rescatadas desde NVS.
 3.  **Sistema de medición energética:** Lectura del sensor INA3221 vía I2C con capacidad de auto-sanación ante fallos en el bus. Acumulación en buffer circular para cálculo de media móvil de 24 horas.
 4.  **Capa de actuación (Silky Motion):** Generación de señales PWM de 16 bits a 50 Hz con lógica de rampas de velocidad y zona muerta configurable para eliminar jitter y proteger los actuadores.
 5.  **Guardián del sistema (TWDT):** Task Watchdog Timer configurado a 10 s, suscrito a todas las tareas críticas, con alimentación periódica que garantiza la detección y recuperación ante bloqueos.
@@ -67,7 +67,7 @@ La filosofía central del firmware es **evitar el reinicio del procesador en tod
 ## Estado del proyecto
 Actualmente, esta versión 2.0 se encuentra en estado **estable y funcional**, validada para operación continua 24/7 en condiciones de campo. Ha cumplido con los objetivos de diseño principales:
 *   **Conectividad robusta:** Triple redundancia WiFi con reconexión autónoma y fail-over transparente entre SSIDs.
-*   **Operación autónoma:** La inercia GPS y la persistencia NVS garantizan el seguimiento de posición solar incluso ante pérdida total de señal satelital. El historial de potencia (buffer INA) se mantiene en RAM durante la operación continua.
+*   **Operación autónoma:** La inercia GPS y la persistencia NVS garantizan el seguimiento de posición solar incluso ante pérdida total de señal satelital, sin interrumpir el resto de las tareas ni el estado del sistema en RAM.
 *   **Cinemática silenciosa:** Sistema Silky Motion elimina el estrés mecánico en los actuadores y suprime el jitter en posición de reposo.
 *   **Monitoreo científico:** Medición real de potencia (mW) con promediado inteligente para análisis comparativo de eficiencia energética.
 
