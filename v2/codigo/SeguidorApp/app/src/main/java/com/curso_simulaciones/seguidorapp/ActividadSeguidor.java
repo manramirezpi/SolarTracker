@@ -593,7 +593,8 @@ public class ActividadSeguidor extends Activity implements Runnable {
     public void run() {
         while (threadRunning) {
             try {
-                Thread.sleep(500);
+                // Aumentamos frecuencia a 10Hz (100ms) para fluidez visual
+                Thread.sleep(100);
                 String data = cliente.leerString();
                 if (data != null) {
                     procesarDato(data);
@@ -617,78 +618,62 @@ public class ActividadSeguidor extends Activity implements Runnable {
     private void procesarDato(String data) {
         try {
             JSONObject obj = new JSONObject(data);
-            if (obj.has("sol_real")) {
-                JSONObject sol = obj.getJSONObject("sol_real");
-                AlmacenDatosRAM.sol_az = (float) sol.getDouble("az");
-                AlmacenDatosRAM.sol_el = (float) sol.getDouble("el");
+            
+            // --- PROCESAMIENTO CANAL RÁPIDO (10Hz) ---
+            if (obj.has("sol")) {
+                JSONObject sol = obj.getJSONObject("sol");
+                AlmacenDatosRAM.sol_az = (float) sol.optDouble("az", AlmacenDatosRAM.sol_az);
+                AlmacenDatosRAM.sol_el = (float) sol.optDouble("el", AlmacenDatosRAM.sol_el);
             }
             if (obj.has("servos")) {
                 JSONObject servos = obj.getJSONObject("servos");
-                AlmacenDatosRAM.servo_az = (float) servos.optDouble("az", servos.optDouble("ang_az", servos.optDouble("pwm_az", AlmacenDatosRAM.servo_az)));
-                AlmacenDatosRAM.servo_el = (float) servos.optDouble("el", servos.optDouble("ang_el", servos.optDouble("pwm_el", AlmacenDatosRAM.servo_el)));
+                AlmacenDatosRAM.servo_az = (float) servos.optDouble("az", AlmacenDatosRAM.servo_az);
+                AlmacenDatosRAM.servo_el = (float) servos.optDouble("el", AlmacenDatosRAM.servo_el);
             }
+            if (obj.has("p")) {
+                JSONObject p = obj.getJSONObject("p");
+                AlmacenDatosRAM.p1_inst = (float) p.optDouble("c1", 0); // Recibimos mW nativos
+                AlmacenDatosRAM.p1_avg_dia = (float) p.optDouble("a1", 0);
+                AlmacenDatosRAM.p2_inst = (float) p.optDouble("c2", 0);
+                AlmacenDatosRAM.p2_avg_dia = (float) p.optDouble("a2", 0);
+                
+                // Actualización de media móvil local para suavizado de gauges
+                contadorMuestreoPotencia++;
+                if (contadorMuestreoPotencia % 5 == 0) {
+                    actualizarBufferCircular(AlmacenDatosRAM.p1_inst, true);
+                    AlmacenDatosRAM.p1_avg = obtenerMediaCircular(true);
+                    actualizarBufferCircular(AlmacenDatosRAM.p2_inst, false);
+                    AlmacenDatosRAM.p2_avg = obtenerMediaCircular(false);
+                }
+            }
+
+            // --- PROCESAMIENTO CANAL LENTO (1Hz) ---
             if (obj.has("gps")) {
                 JSONObject gps = obj.getJSONObject("gps");
-                AlmacenDatosRAM.lat = (float) gps.getDouble("lat");
-                AlmacenDatosRAM.lon = (float) gps.getDouble("lon");
-                // Soporte para booleano o string "true"/"false"
-                Object validoObj = gps.get("valido");
+                AlmacenDatosRAM.lat = (float) gps.optDouble("lat", AlmacenDatosRAM.lat);
+                AlmacenDatosRAM.lon = (float) gps.optDouble("lon", AlmacenDatosRAM.lon);
+                Object validoObj = gps.opt("val");
                 if (validoObj instanceof Boolean) {
                     AlmacenDatosRAM.gps_valido = (Boolean) validoObj;
                 } else {
                     AlmacenDatosRAM.gps_valido = String.valueOf(validoObj).equalsIgnoreCase("true");
                 }
             }
+            
             AlmacenDatosRAM.fecha = obj.optString("fecha", AlmacenDatosRAM.fecha);
             AlmacenDatosRAM.hora = obj.optString("hora", AlmacenDatosRAM.hora);
             
-            String modoPrincipal = obj.optString("modo", AlmacenDatosRAM.modo);
-            String parking = obj.optString("modo_parking", "false");
-            if (parking.equalsIgnoreCase("true")) {
-                AlmacenDatosRAM.modo = modoPrincipal + " (parking)";
-            } else {
-                AlmacenDatosRAM.modo = modoPrincipal;
+            if (obj.has("modo")) {
+                String modoPrincipal = obj.getString("modo");
+                String parking = obj.optString("parking", "false");
+                if (parking.equalsIgnoreCase("true")) {
+                    AlmacenDatosRAM.modo = modoPrincipal + " (parking)";
+                } else {
+                    AlmacenDatosRAM.modo = modoPrincipal;
+                }
             }
-            AlmacenDatosRAM.factor_vel = (float) obj.optDouble("factor_vel", AlmacenDatosRAM.factor_vel);
             
-            // Procesar Potencia (Sensor INA219)
-            if (obj.has("ina")) {
-                JSONObject ina = obj.getJSONObject("ina");
-                boolean actualizarPromedio = (contadorMuestreoPotencia % 10 == 0);
-                
-                if (ina.has("canal1")) {
-                    JSONObject c1 = ina.getJSONObject("canal1");
-                    if (c1.optBoolean("valido", false)) {
-                        AlmacenDatosRAM.p1_inst = (float) c1.optDouble("p", 0);
-                        AlmacenDatosRAM.p1_avg_dia = (float) c1.optDouble("p_avg_dia", AlmacenDatosRAM.p1_avg_dia);
-                        
-                        if (actualizarPromedio) {
-                            actualizarBufferCircular(AlmacenDatosRAM.p1_inst, true);
-                            AlmacenDatosRAM.p1_avg = obtenerMediaCircular(true);
-                        }
-                    } else {
-                        AlmacenDatosRAM.p1_inst = 0;
-                    }
-                }
-                
-                if (ina.has("canal2")) {
-                    JSONObject c2 = ina.getJSONObject("canal2");
-                    if (c2.optBoolean("valido", false)) {
-                        AlmacenDatosRAM.p2_inst = (float) c2.optDouble("p", 0);
-                        AlmacenDatosRAM.p2_avg_dia = (float) c2.optDouble("p_avg_dia", AlmacenDatosRAM.p2_avg_dia);
-                        
-                        if (actualizarPromedio) {
-                            actualizarBufferCircular(AlmacenDatosRAM.p2_inst, false);
-                            AlmacenDatosRAM.p2_avg = obtenerMediaCircular(false);
-                        }
-                    } else {
-                        AlmacenDatosRAM.p2_inst = 0;
-                    }
-                }
-                
-                // Incrementamos solo si llegó un paquete de INA válido (aunque sea un canal)
-                contadorMuestreoPotencia++;
-            }
+            AlmacenDatosRAM.factor_vel = (float) obj.optDouble("v_sim", AlmacenDatosRAM.factor_vel);
 
             // Si es el primer dato que llega, sincronizamos sliders
             if (primeraVez && AlmacenDatosRAM.lat != 0) {
@@ -740,15 +725,15 @@ public class ActividadSeguidor extends Activity implements Runnable {
         textviewFechaHora.setText(AlmacenDatosRAM.fecha + " " + AlmacenDatosRAM.hora + " | Modo: " + AlmacenDatosRAM.modo);
         textviewAviso.setText(AlmacenDatosRAM.conectado_PubSub);
 
-        // Actualizar Potencia Canal 1 (Convertido a mW)
-        p1Inst.setText(String.format("Inst: %.3f mW", AlmacenDatosRAM.p1_inst * 1000));
-        p1Avg.setText(String.format("Med: %.3f mW", AlmacenDatosRAM.p1_avg * 1000));
-        p1Daily.setText(String.format("Dia: %.3f mW", AlmacenDatosRAM.p1_avg_dia * 1000));
+        // Actualizar Potencia Canal 1 (Ya en mW)
+        p1Inst.setText(String.format("Inst: %.4f mW", AlmacenDatosRAM.p1_inst));
+        p1Avg.setText(String.format("Med: %.4f mW", AlmacenDatosRAM.p1_avg));
+        p1Daily.setText(String.format("Dia: %.4f mW", AlmacenDatosRAM.p1_avg_dia));
 
-        // Actualizar Potencia Canal 2 (Convertido a mW)
-        p2Inst.setText(String.format("Inst: %.3f mW", AlmacenDatosRAM.p2_inst * 1000));
-        p2Avg.setText(String.format("Med: %.3f mW", AlmacenDatosRAM.p2_avg * 1000));
-        p2Daily.setText(String.format("Dia: %.3f mW", AlmacenDatosRAM.p2_avg_dia * 1000));
+        // Actualizar Potencia Canal 2 (Ya en mW)
+        p2Inst.setText(String.format("Inst: %.4f mW", AlmacenDatosRAM.p2_inst));
+        p2Avg.setText(String.format("Med: %.4f mW", AlmacenDatosRAM.p2_avg));
+        p2Daily.setText(String.format("Dia: %.4f mW", AlmacenDatosRAM.p2_avg_dia));
 
         // Cálculo Eficiencia
         if (AlmacenDatosRAM.p2_avg > 0.001f) {

@@ -20,7 +20,8 @@ public class ClientePubSubMQTT implements MqttCallback, IMqttActionListener {
 
     private Activity actividad;
     private MqttAndroidClient client;
-    private String topicStr;
+    private String topicSubFast;
+    private String topicSubSlow;
     private String topicPub;
     private String datoString;
 
@@ -28,7 +29,8 @@ public class ClientePubSubMQTT implements MqttCallback, IMqttActionListener {
 
     public ClientePubSubMQTT(Activity actividad) {
         this.actividad = actividad;
-        this.topicStr = AlmacenDatosRAM.topicStr;
+        this.topicSubFast = AlmacenDatosRAM.topicSubFast;
+        this.topicSubSlow = AlmacenDatosRAM.topicSubSlow;
         this.topicPub = AlmacenDatosRAM.topicPub;
     }
 
@@ -56,9 +58,10 @@ public class ClientePubSubMQTT implements MqttCallback, IMqttActionListener {
     @Override
     public void onSuccess(IMqttToken asyncActionToken) {
         try {
-            Log.d(TAG, "Conexión exitosa. Suscribiendo a: " + topicStr);
-            client.subscribe(topicStr, 0);
-            AlmacenDatosRAM.conectado_PubSub = "Suscrito OK a: " + topicStr;
+            Log.d(TAG, "Conexión exitosa. Suscribiendo a canales de telemetría...");
+            client.subscribe(topicSubFast, 0);
+            client.subscribe(topicSubSlow, 0);
+            AlmacenDatosRAM.conectado_PubSub = "Monitoreo activado (FAST/SLOW)";
             AlmacenDatosRAM.conectado = true;
         } catch (Exception e) {
             Log.e(TAG, "Error al suscribir", e);
@@ -86,9 +89,9 @@ public class ClientePubSubMQTT implements MqttCallback, IMqttActionListener {
     public synchronized void messageArrived(String topic, MqttMessage mqttMessage) throws Exception {
         String payload = new String(mqttMessage.getPayload());
         Log.d(TAG, "Mensaje de " + topic + ": " + payload);
-        if (topic.equals(topicStr)) {
+        // Aceptamos cualquier dato de nuestros tópicos de suscripción
+        if (topic.equals(topicSubFast) || topic.equals(topicSubSlow)) {
             datoString = payload;
-            AlmacenDatosRAM.conectado_PubSub = "Dato OK (" + payload.length() + " bytes)";
         }
     }
 

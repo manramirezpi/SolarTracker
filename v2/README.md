@@ -12,8 +12,9 @@ Lo que en la v1.0 eran perspectivas de evolución, en la v2.0 es una realidad fu
 | **Control** | Comandos por cable (UART) | Mando inalámbrico bidireccional |
 | **Monitoreo** | Teórico (cálculo solar) | Científico (INA3221 — mW reales) |
 | **Resiliencia** | Protección básica | Triple WiFi redundante + fail-over |
-| **Cinemática** | Movimiento directo | Silky Motion (rampas + histéresis 0.4°) |
-| **Análisis** | No disponible | Media móvil 24 h (solo horas de sol) |
+| **Cinemática** | Movimiento directo | Silky Motion (rampas + reactividad manual instantánea) |
+| **Telemetría** | Unificada (1 Hz) | **Multinivel (10 Hz Fast / 1 Hz Slow)** |
+| **Integridad** | Ninguna | **Validación Checksum XOR (NMEA-0183)** |
 
 ## Características principales
 - **Triple redundancia WiFi:** Gestión automática entre red principal y dos de respaldo, con fail-over transparente ante fallo de conectividad.
@@ -23,17 +24,18 @@ Lo que en la v1.0 eran perspectivas de evolución, en la v2.0 es una realidad fu
 - **Inercia GPS:** Ante la pérdida de satélites, el sistema mantiene el seguimiento usando las últimas coordenadas válidas disponibles en RAM. Al arranque, si aún no hay señal GPS, se recuperan las coordenadas de la sesión anterior desde NVS (memoria no volátil).
 - **Sistema Silky Motion:** Rampas de aceleración limitadas a 15°/s y zona muerta de 0.4° para movimiento suave, silencioso y sin estrés mecánico.
 - **Análisis de eficiencia comparativa:** Media móvil de 24 horas con exclusión nocturna, para comparación objetiva entre panel móvil y panel estático sin sesgo por lecturas de 0 W.
-- **Control IoT bidireccional:** Protocolo MQTT (`solar/sub`) con comandos JSON para ajuste remoto de posición, coordenadas y velocidad de simulación.
-- **Persistencia NVS inteligente:** Almacenamiento de la última posición GPS válida con filtro antisgaste (~22 km de umbral) para proteger la vida útil de la memoria flash.
+- **Telemetría Multinivel (Mqtt High-Speed):** División del flujo de datos en dos canales independientes: un canal rápido a 10 Hz para control visual fluido (ángulos y potencia) y un canal lento a 1 Hz para información administrativa y GPS.
+- **Validación por Checksum XOR:** Blindaje total contra ruido eléctrico en el bus serie mediante la verificación de la suma de comprobación estándar NMEA-0183, descartando tramas GPS corruptas.
+- **Reactividad Instantánea:** Cancelación inmediata de trayectorias en curso al recibir nuevas órdenes desde la App, eliminando la latencia de respuesta en el mando manual.
 
 ## Arquitectura del sistema
 El firmware está estructurado sobre ESP-IDF v5.5.3 con arquitectura multitarea (FreeRTOS), destacando los siguientes módulos:
 
 1.  **Capa de conectividad:** Gestión WiFi con reconexión automática por backoff exponencial y rotación entre tres SSIDs de respaldo. Comunicación MQTT bidireccional con timeout de red coordinado al TWDT.
 2.  **Motor de procesamiento GPS:** Parseo de tramas NMEA ($GPRMC) con mecanismo de inercia: ante pérdida de señal, el sistema opera con el último fix válido disponible en RAM. Si no hay fix previo en la sesión actual (arranque en frío), se utilizan las coordenadas rescatadas desde NVS.
-3.  **Sistema de medición energética:** Lectura del sensor INA3221 vía I2C con capacidad de auto-sanación ante fallos en el bus. Acumulación en buffer circular para cálculo de media móvil de 24 horas.
-4.  **Capa de actuación (Silky Motion):** Generación de señales PWM de 16 bits a 50 Hz con lógica de rampas de velocidad y zona muerta configurable para eliminar jitter y proteger los actuadores.
-5.  **Guardián del sistema (TWDT):** Task Watchdog Timer configurado a 10 s, suscrito a todas las tareas críticas, con alimentación periódica que garantiza la detección y recuperación ante bloqueos.
+3.  **Medición y Telemetría Multinivel:** Lectura del INA3221 a 10 Hz con auto-sanación de bus. Despacho de telemetría optimizado: un hilo rápido a 10 Hz (`solar/status/fast`) para visualización fluida de potencia y ángulos, y un hilo lento a 1 Hz (`solar/status/slow`) para GPS y promedios diarios.
+4.  **Capa de actuación (Silky Motion):** Generación de PWM de 16 bits con lógica de rampas volátiles que permiten la interrupción inmediata de movimientos anteriores ante nuevas consignas.
+5.  **Guardián del sistema (TWDT):** Task Watchdog Timer configurado a 10 s, suscrito a todas las tareas críticas, garantizando la recuperación ante bloqueos catastróficos.
 
 ## Especificaciones técnicas (v2.0)
 - **Microcontrolador:** ESP32 dual-core (240 MHz).

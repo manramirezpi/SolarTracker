@@ -51,8 +51,9 @@ static const char *TAG = "SOLAR";
 #define MQTT_BROKER_PORT 1883
 #define MQTT_USERNAME "fisica"
 #define MQTT_PASSWORD "iotfisica"
-#define MQTT_TOPIC_PUB "solar/pub" // ESP32 publica aquí
-#define MQTT_TOPIC_SUB "solar/sub" // ESP32 escucha aquí
+#define MQTT_TOPIC_PUB_FAST "solar/status/fast" // 10Hz: Ángulos y Potencia Instantánea
+#define MQTT_TOPIC_PUB_SLOW "solar/status/slow" // 1Hz: GPS, Hora, Promedios e Info
+#define MQTT_TOPIC_SUB "solar/sub"              // ESP32 escucha comandos aquí
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ─── Pines INA3221 ───────────────────────────────────────────────────────────
@@ -237,8 +238,8 @@ static bool en_modo_parking = false; // Indica si está en modo parking (noche)
 // ─── Movimiento gradual de servos ────────────────────────────────────────────
 static float pos_actual_az = 0.0f;          // Posición actual azimut (°)
 static float pos_actual_el = 0.0f;          // Posición actual elevación (°)
-static float pos_obj_az = 0.0f;             // Posición objetivo azimut (°)
-static float pos_obj_el = 0.0f;             // Posición objetivo elevación (°)
+static volatile float pos_obj_az = 0.0f;    // Posición objetivo azimut (°)
+static volatile float pos_obj_el = 0.0f;    // Posición objetivo elevación (°)
 static esp_timer_handle_t timer_movimiento; // Timer para movimiento gradual
 
 // ─── Variables INA3221 ───────────────────────────────────────────────────────
@@ -302,7 +303,9 @@ static uint8_t es_bisiesto(int ano);
 static void Actualizar_Coordenadas_Calculo(void);
 static void Gestionar_Tiempo_Sistema(void);
 static void Incrementar_Tiempo_Simulado(LocalTime_t *t, int segundos);
-static void Publicar_Estado_MQTT(void);
+//static void Publicar_Estado_MQTT(void);
+static void Publicar_Estado_Rapido_MQTT(void);
+static void Publicar_Estado_Lento_MQTT(void);
 static void Cargar_Configuracion_NVS(void);
 static void Guardar_Configuracion_NVS(void);
 static void Procesar_Comando_MQTT(const char *datos, int len);
@@ -485,130 +488,102 @@ static void tarea_principal(void *arg) {
   esp_task_wdt_add(NULL); // Suscribir esta tarea al Watchdog
   uint8_t idx_trama;
   uint32_t ticks_sin_gps = 0;
+  int64_t ahora_us = 0;
+  int64_t ultimo_pub_lento = 0;
 
   while (1) {
     esp_task_wdt_reset(); // Heartbeat para el Task Watchdog Timer (TWDT)
+    ahora_us = esp_timer_get_time();
 
-    // BARRA DE SINCRONIZACIÓN IPC: Bloqueo de tarea hasta recepción de índice
-    // de buffer
+    // 1. RECEPCIÓN GPS (MÁX 100ms)
+    // El timeout de 100ms garantiza que el resto del bucle se ejecute a ~10Hz
+    // incluso si el GPS no envía datos (heartbeat de control).
     if (xQueueReceive(cola_gps, &idx_trama, pdMS_TO_TICKS(100)) == pdTRUE) {
       ticks_sin_gps = 0;
-      char *trama =
-          gps_ping_pong[idx_trama]; // señala el buffer con la trama valida
+      char *trama = gps_ping_pong[idx_trama];
 
-      // Descartar inmediatamente cualquier trama irrelevante o sucia
-      if (strncmp(trama, "$GPRMC", 6) != 0) {
-        continue;
-      }
+      if (strncmp(trama, "$GPRMC", 6) == 0) {
+        Procesar_Trama_GPRMC(trama);
+        Procesar_Tiempo_GPS();
 
-      Procesar_Trama_GPRMC(trama); // Tokenización y extracción de campos NMEA
-      Procesar_Tiempo_GPS(); // Validación y formateo de marcas de tiempo UTC
-
-      // GESTIÓN DE TIEMPO: Prioriza simulación interna sobre sincronía GPS
-      if (!sys_ctrl.simulacion_activa) {
-        Calcular_Hora_Local(&tiempo_local); // Derivación de tiempo civil local
-      }
-
-      if (sys_ctrl.usar_fecha_manual) {
-        tiempo_local.dia = sys_ctrl.dia_manual;
-        tiempo_local.mes = sys_ctrl.mes_manual;
-        tiempo_local.ano = sys_ctrl.anio_manual;
-        // Inyectar fecha manual en la estructura de cálculo solar
-        gps_solar.utc_dia = sys_ctrl.dia_manual;
-        gps_solar.utc_mes = sys_ctrl.mes_manual;
-        gps_solar.utc_ano = sys_ctrl.anio_manual;
-      }
-
-      // VALIDACIÓN DE FIX GPS: Solo actualiza coordenadas si el receptor
-      // reporta 'A' (Active)
-      if (mi_gps.es_valido) {
-        Procesar_Ubicacion_GPS(); // Actualización de registros de
-                                  // posicionamiento
-      }
-
-      // Inferencia astronómica de la posición solar teórica
-      Calcular_Posicion_Solar(&gps_solar_real);
-
-      // Si acaba de cambiar de modo, reestablecer ángulos manuales a la
-      // posición estimada con los calculos
-      // DETECCIÓN DE TRANSICIÓN DE ESTADO: Sincroniza ángulos manuales al
-      // cambiar de modo
-      if (sys_ctrl.servo_manual != servo_manual_anterior) {
-        sys_ctrl.ser_az_manual = angulo_az_actual;
-        sys_ctrl.ser_el_manual = angulo_el_actual;
-      }
-      servo_manual_anterior = sys_ctrl.servo_manual;
-
-      // JERARQUÍA DE CONTROL: Prioridad máxima al control directo de PWM
-      if (sys_ctrl.servo_manual) {
-        Actualizar_Servos_Manual(sys_ctrl.ser_az_manual,
-                                 sys_ctrl.ser_el_manual);
-      } else {
-        // Aplicar coordenadas manuales si las hay
-        Actualizar_Coordenadas_Calculo();
-        Gestionar_Tiempo_Sistema();
-
-        // ─── GESTIÓN DE ESTADOS OPERATIVOS Y TELEMETRÍA DE SEGURIDAD
-        // ───────────────── Implementa la lógica de conmutación de modos y el
-        // heartbeat de conectividad:
-        // - Modo Búsqueda: Heurística de escaneo azimutal (pasos de 45° cada
-        // 10s a 60°
-        //   de elevación) para mitigar la ausencia de coordenadas geográficas o
-        //   de una sincronización temporal válida (Año >= 2024).
-        // - Seguimiento Nominal: Ejecución de modelos astronómicos dinámicos.
-        // - Heartbeat MQTT: Garantiza la visibilidad del sistema forzando
-        // publicaciones
-        //   cada 5 segundos ante la pérdida de sincronía con el receptor GPS.
-
-        // Bloqueo de integridad temporal: Fuerza el 'Modo Búsqueda' si el
-        // tiempo no es válido. Evita el uso de fechas genéricas (ej: 00/00/00)
-        // que provocarían cálculos cinemáticos erróneos tras un reinicio.
-        bool tiempo_sincronizado = (gps_solar.utc_ano >= 2024);
-        if (sys_ctrl.usar_fecha_manual || sys_ctrl.simulacion_activa) {
-          tiempo_sincronizado = true; // Responsabilidad delegada al usuario
+        if (!sys_ctrl.simulacion_activa) {
+          Calcular_Hora_Local(&tiempo_local);
         }
 
-        // Condición de Salida del Modo Búsqueda (Integridad Dual):
-        // Se autoriza el seguimiento si se dispone de coordenadas
-        // (NVS/Manual/GPS) Y el tiempo ha sido sincronizado (>2024).
-        if (en_modo_busqueda && ultima_lat_valida != 0.0 &&
-            tiempo_sincronizado) {
-          en_modo_busqueda = false;
-          ESP_LOGI(TAG, "Integridad dual verificada (Posición + Tiempo). "
-                        "Iniciando Seguimiento...");
+        if (sys_ctrl.usar_fecha_manual) {
+          tiempo_local.dia = sys_ctrl.dia_manual;
+          tiempo_local.mes = sys_ctrl.mes_manual;
+          tiempo_local.ano = sys_ctrl.anio_manual;
+          gps_solar.utc_dia = sys_ctrl.dia_manual;
+          gps_solar.utc_mes = sys_ctrl.mes_manual;
+          gps_solar.utc_ano = sys_ctrl.anio_manual;
         }
 
-        if (en_modo_busqueda || !tiempo_sincronizado) {
-          // Modo búsqueda: elevación 60°, azimut rotando cada 10 segundos
-          int64_t ahora = esp_timer_get_time();
-          if (ahora - ultimo_cambio_az > 10000000LL) { // 10 segundos
-            angulo_az_busqueda += 45.0f;
-            if (angulo_az_busqueda > 90.0f)
-              angulo_az_busqueda = -90.0f;
-            ultimo_cambio_az = ahora;
-          }
-          Actualizar_Servos_Busqueda(angulo_az_busqueda, 60.0f);
-        } else {
-          Calcular_Posicion_Solar(&gps_solar); // Calcular posicion de control
-                                               // (puede ser manual/simulada)
-          Actualizar_Servos();
+        if (mi_gps.es_valido) {
+          Procesar_Ubicacion_GPS();
         }
+
+        Calcular_Posicion_Solar(&gps_solar_real);
       }
-
-      // Despacho de telemetría asíncrona hacia el broker
-      Publicar_Estado_MQTT();
-
-      // Log de control:
-      //  ESP_LOGI(TAG, "Sol real Az=%.2f El=%.2f | Control Az=%.2f El=%.2f |
-      //  PWM %d %d",
-      //           gps_solar_real.azimut, gps_solar_real.elevacion,
-      //           gps_solar.azimut,      gps_solar.elevacion,
-      //           pwm_az_actual, pwm_el_actual);
     } else {
       ticks_sin_gps++;
-      if (ticks_sin_gps >= 50) { // Publicar cada 5s si no llegan datos GPS
+    }
+
+    // 2. LÓGICA DE CONTROL Y MOVIMIENTO (SIEMPRE A 10Hz)
+    // Sincronización de modo: Si entramos a modo manual, capturamos posición
+    // actual para evitar saltos. Pero solo si no fue forzado por MQTT (evita
+    // carrera)
+    if (sys_ctrl.servo_manual && !servo_manual_anterior) {
+      sys_ctrl.ser_az_manual = angulo_az_actual;
+      sys_ctrl.ser_el_manual = angulo_el_actual;
+    }
+    servo_manual_anterior = sys_ctrl.servo_manual;
+
+    if (sys_ctrl.servo_manual) {
+      Actualizar_Servos_Manual(sys_ctrl.ser_az_manual, sys_ctrl.ser_el_manual);
+    } else {
+      Actualizar_Coordenadas_Calculo();
+      Gestionar_Tiempo_Sistema();
+
+      bool tiene_ubicacion = (ultima_lat_valida != 0.0 || sys_ctrl.usar_lat_manual);
+      bool tiempo_sincronizado = (gps_solar.utc_ano >= 2024 || 
+                                 sys_ctrl.usar_fecha_manual || 
+                                 sys_ctrl.simulacion_activa);
+
+      if (en_modo_busqueda && tiene_ubicacion && tiempo_sincronizado) {
+        en_modo_busqueda = false;
+        ESP_LOGI(TAG, "Integridad verificada (Manual o GPS). Saliendo de búsqueda...");
+      }
+
+      if (en_modo_busqueda || !tiempo_sincronizado) {
+        int64_t t_ahora = esp_timer_get_time();
+        if (t_ahora - ultimo_cambio_az > 10000000LL) {
+          angulo_az_busqueda += 45.0f;
+          if (angulo_az_busqueda > 90.0f)
+            angulo_az_busqueda = -90.0f;
+          ultimo_cambio_az = t_ahora;
+        }
+        Actualizar_Servos_Busqueda(angulo_az_busqueda, 60.0f);
+      } else {
+        Calcular_Posicion_Solar(&gps_solar);
+        Actualizar_Servos();
+      }
+    }
+
+    // 3. TELEMETRÍA MULTINIVEL (10Hz / 1Hz)
+    if (mqtt_conectado) {
+      Publicar_Estado_Rapido_MQTT(); // Se dispara cada ciclo (~100ms)
+
+      if (ahora_us - ultimo_pub_lento >= 1000000LL) {
+        Publicar_Estado_Lento_MQTT(); // Se dispara cada 1 segundo
+        ultimo_pub_lento = ahora_us;
+        ticks_sin_gps = 0; // Heartbeat
+      }
+    } else {
+      // Si no hay MQTT, el heartbeat se mide en ciclos de 100ms (50 = 5s)
+      if (ticks_sin_gps >= 50) {
         ticks_sin_gps = 0;
-        Publicar_Estado_MQTT(); // Publica aunque no haya datos GPS
+        ESP_LOGW(TAG, "Sistema operando en modo autónomo (Sin GPS/MQTT)");
       }
     }
   }
@@ -924,14 +899,46 @@ static void gps_uart_init(void) {
   uart_driver_install(GPS_UART_NUM, GPS_BUF_SIZE * 2, 0, 0, NULL, 0);
 }
 
-// ─── DESERIALIZACIÓN DE PROTOCOLO (PARSER NMEA-0183) ─────────────────────────
-// Implementa una máquina de estados basada en tokenización por delimitadores.
-// Extrae los campos atómicos de la trama $GPRMC para alimentar la lógica
-// central.
+// Función auxiliar para validar la integridad de la trama NMEA mediante el
+// checksum XOR
+static bool Validar_Checksum_NMEA(const char *buffer) {
+  if (buffer[0] != '$')
+    return false;
+
+  uint8_t checksum_calculado = 0;
+  const char *p = buffer + 1; // Saltar el símbolo '$'
+
+  // El checksum en NMEA es el XOR de todos los caracteres entre '$' y '*'
+  while (*p && *p != '*') {
+    checksum_calculado ^= *p;
+    p++;
+  }
+
+  // Si no se encontró el asterisco, la trama está incompleta
+  if (*p != '*')
+    return false;
+
+  p++; // Saltar el '*'
+
+  // Convertir el checksum hexadecimal de la trama a entero
+  char *endptr;
+  uint8_t checksum_recibido = (uint8_t)strtol(p, &endptr, 16);
+
+  // Es válido si el cálculo coincide con el reporte del GPS
+  return (checksum_calculado == checksum_recibido);
+}
+
 static void Procesar_Trama_GPRMC(char *buffer) {
-  // Verifica que la trama sea GPRMC, para no perder tiempo
+  // 1. Filtrado rápido: Solo nos interesan tramas GPRMC
   if (strncmp(buffer, "$GPRMC", 6) != 0)
     return;
+
+  // 2. Validación de Integridad (Checksum): Protege contra ruidos eléctricos
+  // causados por los motores o cables largos que podrían corromper caracteres
+  if (!Validar_Checksum_NMEA(buffer)) {
+    ESP_LOGW("GPS", "Trama descartada por Checksum inválido.");
+    return;
+  }
 
   char *start = buffer; // puntero al inicio de la trama
   char *end;            // puntero al final de la trama
@@ -1312,33 +1319,44 @@ static void Gestionar_Tiempo_Sistema(void) {
 //   - Estado del modo parking
 //   - Lecturas del INA3221
 
-static void Publicar_Estado_MQTT(void) {
-  // si no está conectado, no intenta enviar nada
+static void Publicar_Estado_Rapido_MQTT(void) {
   if (!mqtt_conectado)
     return;
 
-  // Calcular ángulos físicos reales de los servos desde el PWM actual
+  // Ángulos reales calculados a partir del PWM actual (Silky Motion feedback)
   float servo_az_deg = (1500.0f - (float)pwm_az_actual) / FACTOR_CONVERSION;
   float servo_el_deg = ((float)(pwm_el_actual - 500)) / FACTOR_CONVERSION;
 
-  char json[640];
+  char json[256]; // JSON compacto para alta frecuencia (10Hz)
   snprintf(json, sizeof(json),
            "{"
-           "\"sol_real\":{\"az\":%.2f,\"el\":%.2f},"
+           "\"sol\":{\"az\":%.2f,\"el\":%.2f},"
            "\"servos\":{\"az\":%.2f,\"el\":%.2f},"
-           "\"hora\":\"%02d:%02d:%02d\","
-           "\"fecha\":\"%02d/%02d/%04d\","
-           "\"gps\":{\"lat\":%.5f,\"lon\":%.5f,\"valido\":%s},"
-           "\"modo\":\"%s\","
-           "\"factor_vel\":%d,"
-           "\"modo_parking\":%s,"
-           "\"ina\":{"
-           "\"canal1\":{\"valido\":%s,\"p\":%.6f,\"p_avg_dia\":%.6f},"
-           "\"canal2\":{\"valido\":%s,\"p\":%.6f,\"p_avg_dia\":%.6f}"
-           "}"
+           "\"p\":{\"c1\":%.2f,\"a1\":%.2f,\"c2\":%.2f,\"a2\":%.2f}"
            "}",
            gps_solar_real.azimut, gps_solar_real.elevacion, servo_az_deg,
-           servo_el_deg, tiempo_local.hora, tiempo_local.min, tiempo_local.seg,
+           servo_el_deg, (ina_ch1_p * 1000.0f),
+           (prom_ch1.promedio_diario * 1000.0f), (ina_ch2_p * 1000.0f),
+           (prom_ch2.promedio_diario * 1000.0f));
+
+  esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC_PUB_FAST, json, 0, 0, 0);
+}
+
+static void Publicar_Estado_Lento_MQTT(void) {
+  if (!mqtt_conectado)
+    return;
+
+  char json[380]; // JSON optimizado para baja frecuencia (1Hz)
+  snprintf(json, sizeof(json),
+           "{"
+           "\"hora\":\"%02d:%02d:%02d\","
+           "\"fecha\":\"%02d/%02d/%04d\","
+           "\"gps\":{\"lat\":%.5f,\"lon\":%.5f,\"val\":%s},"
+           "\"modo\":\"%s\","
+           "\"v_sim\":%d,"
+           "\"parking\":%s"
+           "}",
+           tiempo_local.hora, tiempo_local.min, tiempo_local.seg,
            tiempo_local.dia, tiempo_local.mes, tiempo_local.ano,
            gps_solar_real.latitud_deg, gps_solar_real.longitud_deg,
            mi_gps.es_valido ? "true" : "false",
@@ -1349,14 +1367,9 @@ static void Publicar_Estado_MQTT(void) {
                       : (sys_ctrl.usar_lat_manual || sys_ctrl.usar_lon_manual
                              ? "MANUAL"
                              : "GPS")),
-           sys_ctrl.factor_velocidad, en_modo_parking ? "true" : "false",
-           ina_ch1_valido ? "true" : "false", (ina_ch1_p * 1000.0f),
-           (prom_ch1.promedio_diario * 1000.0f),
-           ina_ch2_valido ? "true" : "false", (ina_ch2_p * 1000.0f),
-           (prom_ch2.promedio_diario * 1000.0f));
+           sys_ctrl.factor_velocidad, en_modo_parking ? "true" : "false");
 
-  // QOS 0 para envío rápido sin acuses de recibo que bloqueen el socket
-  esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC_PUB, json, 0, 0, 0);
+  esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC_PUB_SLOW, json, 0, 0, 0);
 }
 
 // ─── ESTRATEGIA DE PERSISTENCIA NVS (PROTECCIÓN DE FLASH) ────────────────────
@@ -1541,9 +1554,11 @@ static void Procesar_Comando_MQTT(const char *datos, int len) {
     // Rango permisivo (90.1) para evitar que el slider falle en los bordes
     if (valor >= -90.1f && valor <= 90.1f) {
       sys_ctrl.ser_az_manual = valor;
+      // Primero actualizamos el valor, luego el modo para que tarea_principal
+      // lo encuentre listo
       sys_ctrl.servo_manual = 1;
-      // Previene que el loop principal sobrescriba este comando durante la
-      // transición de modo
+      // Marcamos como sincronizado para evitar que tarea_principal sobreescriba
+      // el joystick con la posición anterior en el primer ciclo
       servo_manual_anterior = true;
       ESP_LOGI(TAG, "MQTT: Servo AZ manual = %.2f", valor);
     }

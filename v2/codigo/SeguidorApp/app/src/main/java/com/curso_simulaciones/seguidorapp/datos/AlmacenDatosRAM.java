@@ -12,7 +12,8 @@ public class AlmacenDatosRAM {
     public static String MQTTHOST = "tcp://45.56.74.248:1883"; 
     public static String USERNAME = "fisica";
     public static String PASSWORD = "iotfisica";
-    public static String topicStr = "solar/pub";
+    public static String topicSubFast = "solar/status/fast";
+    public static String topicSubSlow = "solar/status/slow";
     public static String topicPub = "solar/sub";
 
     public static volatile String conectado_PubSub = "Hacer clic en CONECTAR...";
