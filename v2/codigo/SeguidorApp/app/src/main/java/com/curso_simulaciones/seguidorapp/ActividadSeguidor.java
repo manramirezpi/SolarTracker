@@ -55,6 +55,8 @@ public class ActividadSeguidor extends Activity implements Runnable {
     private boolean intervencionGPS = false;   // Prioridad manual sobre coordenadas
     private boolean intervencionServo = false; // Prioridad manual sobre ángulos servo
     private long lastManualInteractionTime = 0; 
+    private long ultimoTiempoPublishGPS = 0;   // Throttling MQTT GPS
+    private long ultimoTiempoPublishServo = 0; // Throttling MQTT Servos
     private static final long MANUAL_LOCKOUT_MS = 3000; 
     private int contadorMuestreoPotencia = 0; // Contador para diezmado (1 de cada 10)
     private volatile boolean threadRunning = true; // Control del hilo
@@ -491,12 +493,18 @@ public class ActividadSeguidor extends Activity implements Runnable {
                 if (fromUser) {
                     intervencionGPS = true;   // Usuario toma prioridad en GPS
                     intervencionServo = false; // Al mover coords, liberamos los servos para que sigan al nuevo punto
-                    lastManualInteractionTime = 0; 
-                    publicarComando("set_lat", lat, true);
+                    lastManualInteractionTime = System.currentTimeMillis(); 
+                    if (System.currentTimeMillis() - ultimoTiempoPublishGPS > 150) {
+                        publicarComando("set_lat", lat, true);
+                        ultimoTiempoPublishGPS = System.currentTimeMillis();
+                    }
                 }
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
-            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {
+                float lat = (seekBar.getProgress() - 9000) / 100f;
+                publicarComando("set_lat", lat, true);
+            }
         });
 
         sliderLon.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
@@ -505,14 +513,20 @@ public class ActividadSeguidor extends Activity implements Runnable {
                 float lon = (progress - 18000) / 100f;
                 labelLon.setText(String.format("Lon: %.2f", lon));
                 if (fromUser) {
-                    intervencionGPS = true;   // Usuario toma prioridad en GPS
-                    intervencionServo = false; // Liberamos servos para que sigan al nuevo punto
-                    lastManualInteractionTime = 0; 
-                    publicarComando("set_lon", lon, true);
+                    intervencionGPS = true;   
+                    intervencionServo = false; 
+                    lastManualInteractionTime = System.currentTimeMillis(); 
+                    if (System.currentTimeMillis() - ultimoTiempoPublishGPS > 150) {
+                        publicarComando("set_lon", lon, true);
+                        ultimoTiempoPublishGPS = System.currentTimeMillis();
+                    }
                 }
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
-            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {
+                float lon = (seekBar.getProgress() - 18000) / 100f;
+                publicarComando("set_lon", lon, true);
+            }
         });
 
         sliderTiempo.setOnValueChangeListener(value -> {
@@ -530,12 +544,18 @@ public class ActividadSeguidor extends Activity implements Runnable {
                 labelManualAz.setText("Manual Az: " + valorReal + "°");
                 if (fromUser) {
                     intervencionServo = true;
-                    lastManualInteractionTime = 0;
-                    publicarComando("set_ser_az", valorReal, true);
+                    lastManualInteractionTime = System.currentTimeMillis();
+                    if (System.currentTimeMillis() - ultimoTiempoPublishServo > 150) {
+                        publicarComando("set_ser_az", valorReal, true);
+                        ultimoTiempoPublishServo = System.currentTimeMillis();
+                    }
                 }
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
-            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {
+                int valorReal = seekBar.getProgress() - 90;
+                publicarComando("set_ser_az", valorReal, true);
+            }
         });
 
         sliderManualEl.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
@@ -544,12 +564,17 @@ public class ActividadSeguidor extends Activity implements Runnable {
                 labelManualEl.setText("Manual El: " + progress + "°");
                 if (fromUser) {
                     intervencionServo = true; // El usuario toma prioridad absoluta
-                    lastManualInteractionTime = 0; // Prioridad inmediata sin resistencia
-                    publicarComando("set_ser_el", progress, true);
+                    lastManualInteractionTime = System.currentTimeMillis(); 
+                    if (System.currentTimeMillis() - ultimoTiempoPublishServo > 150) {
+                        publicarComando("set_ser_el", progress, true);
+                        ultimoTiempoPublishServo = System.currentTimeMillis();
+                    }
                 }
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
-            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {
+                publicarComando("set_ser_el", seekBar.getProgress(), true);
+            }
         });
     }
 
@@ -593,16 +618,40 @@ public class ActividadSeguidor extends Activity implements Runnable {
     public void run() {
         while (threadRunning) {
             try {
-                // Aumentamos frecuencia a 10Hz (100ms) para fluidez visual
-                Thread.sleep(100);
-                String data = cliente.leerString();
-                if (data != null) {
+                // Aumentamos frecuencia a 20Hz (50ms) para procesar rápido la cola
+                Thread.sleep(50);
+                boolean uiRequiereUpdate = false;
+                String data;
+                // Drena la cola completamente antes de actualizar la UI
+                // Esto garantiza que el reloj avance a saltos exactos sin retrasos por acumulación
+                while ((data = cliente.leerString()) != null) {
                     procesarDato(data);
+                    uiRequiereUpdate = true;
+                }
+                
+                if (uiRequiereUpdate) {
                     myHandler.post(this::actualizarUI);
                 }
             } catch (InterruptedException e) {
                 break;
             }
+        }
+    }
+
+    @Override
+    protected void onRestart() {
+        super.onRestart();
+        // Cuando Android resume la app, el sistema puede haber matado el socket en segundo plano.
+        // Forzamos un reinicio de la conexión MQTT de forma segura.
+        if (cliente != null) {
+            AlmacenDatosRAM.conectado_PubSub = "Restaurando conexión MQTT...";
+            AlmacenDatosRAM.conectado = false;
+            cliente.desconectar();
+            myHandler.postDelayed(() -> {
+                if (!AlmacenDatosRAM.conectado) {
+                    cliente.conectar();
+                }
+            }, 1000);
         }
     }
 
@@ -617,25 +666,25 @@ public class ActividadSeguidor extends Activity implements Runnable {
 
     private void procesarDato(String data) {
         try {
-            JSONObject obj = new JSONObject(data);
-            
-            // --- PROCESAMIENTO CANAL RÁPIDO (10Hz) ---
-            if (obj.has("sol")) {
-                JSONObject sol = obj.getJSONObject("sol");
-                AlmacenDatosRAM.sol_az = (float) sol.optDouble("az", AlmacenDatosRAM.sol_az);
-                AlmacenDatosRAM.sol_el = (float) sol.optDouble("el", AlmacenDatosRAM.sol_el);
-            }
-            if (obj.has("servos")) {
-                JSONObject servos = obj.getJSONObject("servos");
-                AlmacenDatosRAM.servo_az = (float) servos.optDouble("az", AlmacenDatosRAM.servo_az);
-                AlmacenDatosRAM.servo_el = (float) servos.optDouble("el", AlmacenDatosRAM.servo_el);
-            }
-            if (obj.has("p")) {
-                JSONObject p = obj.getJSONObject("p");
-                AlmacenDatosRAM.p1_inst = (float) p.optDouble("c1", 0); // Recibimos mW nativos
-                AlmacenDatosRAM.p1_avg_dia = (float) p.optDouble("a1", 0);
-                AlmacenDatosRAM.p2_inst = (float) p.optDouble("c2", 0);
-                AlmacenDatosRAM.p2_avg_dia = (float) p.optDouble("a2", 0);
+            // ESTRATEGIA DE OPTIMIZACIÓN (Garbage Collector Bypass):
+            // Las tramas "FAST" (a 4Hz) causan saturación de memoria en Android si se usa JSONObject repetidamente.
+            // Para la telemetría viva extraemos los valores de forma plana usando punteros en el String base, 
+            // evitando instanciar miles de objetos JSON y Arrays en la RAM.
+            if (data.contains("\"sol\":")) {
+                int idxSol = data.indexOf("\"sol\":");
+                int idxServos = data.indexOf("\"servos\":");
+                int idxP = data.indexOf("\"p\":");
+
+                AlmacenDatosRAM.sol_az = extraerFloat(data, "\"az\":", idxSol);
+                AlmacenDatosRAM.sol_el = extraerFloat(data, "\"el\":", idxSol);
+                
+                AlmacenDatosRAM.servo_az = extraerFloat(data, "\"az\":", idxServos);
+                AlmacenDatosRAM.servo_el = extraerFloat(data, "\"el\":", idxServos);
+                
+                AlmacenDatosRAM.p1_inst = extraerFloat(data, "\"c1\":", idxP);
+                AlmacenDatosRAM.p1_avg_dia = extraerFloat(data, "\"a1\":", idxP);
+                AlmacenDatosRAM.p2_inst = extraerFloat(data, "\"c2\":", idxP);
+                AlmacenDatosRAM.p2_avg_dia = extraerFloat(data, "\"a2\":", idxP);
                 
                 // Actualización de media móvil local para suavizado de gauges
                 contadorMuestreoPotencia++;
@@ -645,9 +694,14 @@ public class ActividadSeguidor extends Activity implements Runnable {
                     actualizarBufferCircular(AlmacenDatosRAM.p2_inst, false);
                     AlmacenDatosRAM.p2_avg = obtenerMediaCircular(false);
                 }
+                return; // Sale temprano, las tramas rápidas no traen datos de GPS o Fecha
             }
-
+            
             // --- PROCESAMIENTO CANAL LENTO (1Hz) ---
+            // Como las tramas lentas (GPS, hora, modo) solo ocurren 1 vez por segundo, 
+            // usar JSONObject aquí NO impacta la batería ni la fluidez del dispositivo.
+            JSONObject obj = new JSONObject(data);
+
             if (obj.has("gps")) {
                 JSONObject gps = obj.getJSONObject("gps");
                 AlmacenDatosRAM.lat = (float) gps.optDouble("lat", AlmacenDatosRAM.lat);
@@ -682,8 +736,29 @@ public class ActividadSeguidor extends Activity implements Runnable {
                     primeraVez = false;
                 });
             }
-        } catch (JSONException e) {
+        } catch (Exception e) {
             e.printStackTrace();
+        }
+    }
+
+    // Extractor nativo ultraligero que evita instanciar un motor JSON y reduce la basura (Garbage)
+    private float extraerFloat(String json, String key, int searchFromIndex) {
+        int startIdx = json.indexOf(key, searchFromIndex);
+        if (startIdx == -1) return 0f;
+        startIdx += key.length();
+        int endIdxComma = json.indexOf(',', startIdx);
+        int endIdxBrace = json.indexOf('}', startIdx);
+        
+        int endIdx;
+        if (endIdxComma == -1) endIdx = endIdxBrace;
+        else if (endIdxBrace == -1) endIdx = endIdxComma;
+        else endIdx = Math.min(endIdxComma, endIdxBrace);
+        
+        if (endIdx == -1) return 0f;
+        try {
+            return Float.parseFloat(json.substring(startIdx, endIdx));
+        } catch (Exception e) {
+            return 0f;
         }
     }
 
@@ -710,8 +785,9 @@ public class ActividadSeguidor extends Activity implements Runnable {
         }
 
         // 2. Sincronizar Sliders Manuales (Servo Feedback)
-        // Se sincronizan si NO hay intervención manual activa y ha pasado el tiempo de gracia
-        if (!intervencionServo && dt > MANUAL_LOCKOUT_MS) {
+        // Se sincronizan si ha pasado el tiempo de gracia (el usuario ya soltó el control)
+        if (dt > MANUAL_LOCKOUT_MS) {
+            intervencionServo = false; // Liberamos el flag para que reanuden la telemetría real
             int targetAz = Math.round(AlmacenDatosRAM.servo_az + 90); // Mapeo visual
             int targetEl = Math.round(AlmacenDatosRAM.servo_el);
             

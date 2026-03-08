@@ -23,7 +23,8 @@ public class ClientePubSubMQTT implements MqttCallback, IMqttActionListener {
     private String topicSubFast;
     private String topicSubSlow;
     private String topicPub;
-    private String datoString;
+    
+    private java.util.concurrent.ConcurrentLinkedQueue<String> colaMensajes = new java.util.concurrent.ConcurrentLinkedQueue<>();
 
     private static final String TAG = "ClientePubSubMQTT";
 
@@ -91,7 +92,11 @@ public class ClientePubSubMQTT implements MqttCallback, IMqttActionListener {
         Log.d(TAG, "Mensaje de " + topic + ": " + payload);
         // Aceptamos cualquier dato de nuestros tópicos de suscripción
         if (topic.equals(topicSubFast) || topic.equals(topicSubSlow)) {
-            datoString = payload;
+            colaMensajes.add(payload);
+            // Evitar saturación de memoria si la UI se suspende
+            if (colaMensajes.size() > 50) {
+                colaMensajes.poll();
+            }
         }
     }
 
@@ -100,10 +105,8 @@ public class ClientePubSubMQTT implements MqttCallback, IMqttActionListener {
     public void deliveryComplete(IMqttDeliveryToken token) {
     }
 
-    public synchronized String leerString() {
-        String data = datoString;
-        datoString = null; // Limpiar para evitar reprocesar el mismo dato
-        return data;
+    public String leerString() {
+        return colaMensajes.poll();
     }
 
     public void publicar(String payload) {

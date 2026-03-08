@@ -490,6 +490,7 @@ static void tarea_principal(void *arg) {
   uint32_t ticks_sin_gps = 0;
   int64_t ahora_us = 0;
   int64_t ultimo_pub_lento = 0;
+  int64_t ultimo_pub_rapido = 0;
 
   while (1) {
     esp_task_wdt_reset(); // Heartbeat para el Task Watchdog Timer (TWDT)
@@ -534,8 +535,8 @@ static void tarea_principal(void *arg) {
     // actual para evitar saltos. Pero solo si no fue forzado por MQTT (evita
     // carrera)
     if (sys_ctrl.servo_manual && !servo_manual_anterior) {
-      sys_ctrl.ser_az_manual = angulo_az_actual;
-      sys_ctrl.ser_el_manual = angulo_el_actual;
+      sys_ctrl.ser_az_manual = pos_obj_az;
+      sys_ctrl.ser_el_manual = pos_obj_el;
     }
     servo_manual_anterior = sys_ctrl.servo_manual;
 
@@ -570,9 +571,12 @@ static void tarea_principal(void *arg) {
       }
     }
 
-    // 3. TELEMETRÍA MULTINIVEL (10Hz / 1Hz)
+    // 3. TELEMETRÍA MULTINIVEL (4Hz / 1Hz)
     if (mqtt_conectado) {
-      Publicar_Estado_Rapido_MQTT(); // Se dispara cada ciclo (~100ms)
+      if (ahora_us - ultimo_pub_rapido >= 250000LL) {
+        Publicar_Estado_Rapido_MQTT(); // Se dispara a ~4Hz (250ms)
+        ultimo_pub_rapido = ahora_us;
+      }
 
       if (ahora_us - ultimo_pub_lento >= 1000000LL) {
         Publicar_Estado_Lento_MQTT(); // Se dispara cada 1 segundo
@@ -1486,6 +1490,12 @@ static void Procesar_Comando_MQTT(const char *datos, int len) {
     sys_ctrl.factor_velocidad = 1;
     sys_ctrl.usar_fecha_manual = 0;
     sys_ctrl.servo_manual = 0;
+    
+    // Purga de colas y objetivos: fuerza a sincronizar de inmediato
+    // el objetivo con el físico para cortar de raíz los retardos remanentes
+    pos_obj_az = pos_actual_az;
+    pos_obj_el = pos_actual_el;
+    
     ESP_LOGI(TAG, "MQTT: Reset a modo GPS");
   }
   // 3. COMANDOS: FIJAR UBICACIÓN VIRTUAL (TESTING EN INTERIORES)
@@ -1553,6 +1563,9 @@ static void Procesar_Comando_MQTT(const char *datos, int len) {
 
     // Rango permisivo (90.1) para evitar que el slider falle en los bordes
     if (valor >= -90.1f && valor <= 90.1f) {
+      // Snapshot universal continuo al ángulo FÍSICO ACTUAL (Frenado en seco)
+      sys_ctrl.ser_el_manual = pos_actual_el;
+      
       sys_ctrl.ser_az_manual = valor;
       // Primero actualizamos el valor, luego el modo para que tarea_principal
       // lo encuentre listo
@@ -1572,6 +1585,9 @@ static void Procesar_Comando_MQTT(const char *datos, int len) {
     float valor = (float)atof(val_ptr + 1);
 
     if (valor >= -0.1f && valor <= 180.1f) {
+      // Snapshot universal continuo al ángulo FÍSICO ACTUAL (Frenado en seco)
+      sys_ctrl.ser_az_manual = pos_actual_az;
+      
       sys_ctrl.ser_el_manual = valor;
       sys_ctrl.servo_manual = 1;
       servo_manual_anterior = true;
