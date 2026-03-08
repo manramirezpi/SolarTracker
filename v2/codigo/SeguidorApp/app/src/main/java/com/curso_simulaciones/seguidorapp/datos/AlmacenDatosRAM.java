@@ -48,14 +48,21 @@ public class AlmacenDatosRAM {
     public static float sumaP1 = 0;
     public static float sumaP2 = 0;
     
-    public static final int MAX_HISTORICO = 3000; 
-
-    // Optimización "Ultimate": Búfer Circular con arrays primitivos
-    // Evita el boxing de Float y el desplazamiento de memoria O(n)
-    public static float[] historico_p1 = new float[MAX_HISTORICO];
-    public static float[] historico_p2 = new float[MAX_HISTORICO];
-    public static int indexP1 = 0, countP1 = 0;
-    public static int indexP2 = 0, countP2 = 0;
-
-
+    public static final int MAX_HISTORICO = 100; // Ventana de ~20s para suavizado reactivo
+ 
+     // Optimización "Ultimate": Búfer Circular con arrays primitivos
+     // Evita el boxing de Float y el desplazamiento de memoria O(n)
+     public static float[] historico_p1 = new float[MAX_HISTORICO];
+     public static float[] historico_p2 = new float[MAX_HISTORICO];
+     public static int indexP1 = 0, countP1 = 0;
+     public static int indexP2 = 0, countP2 = 0;
+ 
+    public static void resetStats() {
+        indexP1 = 0; countP1 = 0; sumaP1 = 0;
+        indexP2 = 0; countP2 = 0; sumaP2 = 0;
+        for (int i=0; i<MAX_HISTORICO; i++) {
+            historico_p1[i] = 0;
+            historico_p2[i] = 0;
+        }
+    }
 }

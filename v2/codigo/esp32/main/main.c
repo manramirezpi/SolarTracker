@@ -1738,9 +1738,9 @@ static void ina_actualizar_promedio(INA_Promedio_t *p, float v, float i,
                                     bool valido) {
   int64_t ahora = xTaskGetTickCount() * portTICK_PERIOD_MS;
 
-  // Reinicio diario a medianoche
-  if (tiempo_local.dia != p->dia_actual && tiempo_local.hora == 0 &&
-      tiempo_local.min == 0) {
+  // Reinicio diario: Se dispara ante cualquier cambio de día, no solo a la medianoche.
+  // Esto protege contra acumulaciones residuales si el sistema se apaga de noche.
+  if (p->dia_actual != -1 && tiempo_local.dia != p->dia_actual) {
     memset(p->buffer, 0, sizeof(p->buffer));
     p->indice = 0;
     p->count = 0;
@@ -1750,7 +1750,12 @@ static void ina_actualizar_promedio(INA_Promedio_t *p, float v, float i,
     p->acum_p = 0.0f;
     p->acum_n = 0;
     p->dia_actual = tiempo_local.dia;
-    ESP_LOGI("INA", "Promedio diario reiniciado");
+    ESP_LOGI("INA", "Promedio diario reiniciado por cambio de fecha");
+  }
+
+  // Sincronización inicial del día
+  if (p->dia_actual == -1 && tiempo_local.dia > 0) {
+    p->dia_actual = tiempo_local.dia;
   }
 
   // Nivel 1: ACUMULACIÓN SELECTIVA (Filtro de Relevancia Estadística)

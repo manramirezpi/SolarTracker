@@ -471,6 +471,7 @@ public class ActividadSeguidor extends Activity implements Runnable {
     private void eventos() {
         botonConectar.setOnClickListener(v -> {
             if (!AlmacenDatosRAM.conectado) {
+                AlmacenDatosRAM.resetStats(); // Limpiar promedios previos para empezar fresco
                 cliente.conectar();
             } else {
                 cliente.desconectar();
@@ -579,6 +580,7 @@ public class ActividadSeguidor extends Activity implements Runnable {
     }
 
     private void sincronizarControles() {
+        AlmacenDatosRAM.resetStats(); 
         intervencionGPS = false;
         intervencionServo = false; 
         lastManualInteractionTime = 0; // Permitir el seguimiento inmediato tras el reset
