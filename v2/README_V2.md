@@ -1,73 +1,82 @@
-# Seguidor Solar IoT - Versión 2.0 (Salto Tecnológico y Resiliencia)
+# SOLARTRACKER v2.0
 
-## 📝 Resumen del Proyecto
-Esta versión 2.0 representa la evolución del sistema original basado en STM32 hacia una plataforma **IoT de alta disponibilidad** basada en el **ESP32**. El enfoque ha migrado de un control local y visualización física, a un entorno de monitoreo científico remoto, robustez ante fallos de red y una cinemática de precisión optimizada para la comparación de eficiencia energética.
+## Descripción general
+Esta versión 2.0 representa la evolución del sistema original basado en STM32 hacia una plataforma **IoT de alta disponibilidad** fundamentada en el **ESP32**. El enfoque ha migrado de un control local y visualización física, a un entorno de monitoreo científico remoto, con robustez ante fallos de red y una cinemática de precisión optimizada para la comparación de eficiencia energética.
 
----
+Lo que en la v1.0 eran perspectivas de evolución, en la v2.0 es una realidad funcional:
 
-## 🔄 Evolución: De v1.0 (STM32) a v2.0 (ESP32)
-
-Lo que en la v1.0 eran "Perspectivas de Evolución", en la v2.0 es ahora una realidad funcional:
-
-| Característica | Versión 1.0 (STM32) | Versión 2.0 (ESP32 - Actual) |
+| Característica | Versión 1.0 (STM32) | Versión 2.0 (ESP32) |
 | :--- | :--- | :--- |
-| **Cerebro** | STM32F4 (100MHz) | ESP32 Dual-Core (240MHz) |
-| **Interfaz** | Local (LCD 20x4 + Consola Serial) | **Ubícua (App Móvil + Dashboard MQTT)** |
-| **Control** | Comandos por cable (UART) | **Mando inalámbrico bidireccional** |
-| **Monitoreo** | Teórico (Cálculo solar) | **Científico (INA3221 - mW reales)** |
-| **Resiliencia** | Protección básica | **Triple WiFi Redundante + Fail-over** |
-| **Cinemática** | Movimiento directo | **Silky Motion (Rampas + Histéresis 0.4°)** |
-| **Análisis** | No disponible | **Media Móvil 24h (Solo horas de sol)** |
+| **Procesador** | STM32F4 (100 MHz) | ESP32 dual-core (240 MHz) |
+| **Interfaz** | Local (LCD 20x4 + consola serial) | Ubicua (app móvil + dashboard MQTT) |
+| **Control** | Comandos por cable (UART) | Mando inalámbrico bidireccional |
+| **Monitoreo** | Teórico (cálculo solar) | Científico (INA3221 — mW reales) |
+| **Resiliencia** | Protección básica | Triple WiFi redundante + fail-over |
+| **Cinemática** | Movimiento directo | Silky Motion (rampas + histéresis 0.4°) |
+| **Análisis** | No disponible | Media móvil 24 h (solo horas de sol) |
+
+## Características principales
+- **Triple redundancia WiFi:** Gestión automática entre red principal y dos de respaldo, con fail-over transparente ante fallo de conectividad.
+- **Backoff exponencial:** Estrategia de reintentos con intervalos crecientes (2 s a 64 s) para proteger la salud de la red.
+- **Watchdog de sistema coordinado:** Timeouts de red coordinados (4 s) para evitar bloqueos del sistema ante fallos del broker MQTT, dimensionados por debajo del timeout del TWDT (10 s).
+- **Auto-sanación I2C:** Detección y reconfiguración en caliente del sensor de energía INA3221 sin reinicio del sistema.
+- **Inercia GPS:** Ante la pérdida de satélites, el sistema mantiene el seguimiento usando el último fix válido recuperado desde NVS (memoria no volátil).
+- **Sistema Silky Motion:** Rampas de aceleración limitadas a 15°/s y zona muerta de 0.4° para movimiento suave, silencioso y sin estrés mecánico.
+- **Análisis de eficiencia comparativa:** Media móvil de 24 horas con exclusión nocturna, para comparación objetiva entre panel móvil y panel estático sin sesgo por lecturas de 0 W.
+- **Control IoT bidireccional:** Protocolo MQTT (`solar/sub`) con comandos JSON para ajuste remoto de posición, coordenadas y velocidad de simulación.
+- **Persistencia NVS inteligente:** Almacenamiento de la última posición GPS válida con filtro antisgaste (~22 km de umbral) para proteger la vida útil de la memoria flash.
+
+## Arquitectura del sistema
+El firmware está estructurado sobre ESP-IDF v5.5.3 con arquitectura multitarea (FreeRTOS), destacando los siguientes módulos:
+
+1.  **Capa de conectividad:** Gestión WiFi con reconexión automática por backoff exponencial y rotación entre tres SSIDs de respaldo. Comunicación MQTT bidireccional con timeout de red coordinado al TWDT.
+2.  **Motor de procesamiento GPS:** Parseo de tramas NMEA ($GPRMC) con mecanismo de inercia: ante pérdida de señal, el sistema opera con el último fix válido rescatado desde NVS.
+3.  **Sistema de medición energética:** Lectura del sensor INA3221 vía I2C con capacidad de auto-sanación ante fallos en el bus. Acumulación en buffer circular para cálculo de media móvil de 24 horas.
+4.  **Capa de actuación (Silky Motion):** Generación de señales PWM de 16 bits a 50 Hz con lógica de rampas de velocidad y zona muerta configurable para eliminar jitter y proteger los actuadores.
+5.  **Guardián del sistema (TWDT):** Task Watchdog Timer configurado a 10 s, suscrito a todas las tareas críticas, con alimentación periódica que garantiza la detección y recuperación ante bloqueos.
+
+## Especificaciones técnicas (v2.0)
+- **Microcontrolador:** ESP32 dual-core (240 MHz).
+- **Framework:** ESP-IDF v5.5.3.
+- **Periféricos:**
+    - UART2 (GPS RX — GPIO 17).
+    - Bus I2C (INA3221 — GPIO 21/22).
+    - LEDC PWM: servo azimut (GPIO 19), servo elevación (GPIO 18).
+- **Conectividad:** WiFi 802.11 b/g/n con triple SSID de respaldo.
+- **Almacenamiento:** NVS en flash interna (filtro antisgaste activo).
+
+## Especificaciones de seguimiento (v2.0)
+El sistema mantiene la cobertura hemisférica completa de la v1.0, añadiendo suavidad cinemática y análisis energético:
+
+*   **Rango de elevación:** $0^\circ$ a $90^\circ$.
+    *   El algoritmo detecta elevaciones negativas (noche), deteniendo el movimiento en esta componente y excluyendo la medición del promedio diario de potencia.
+*   **Rango de azimut:** $0^\circ$ a $360^\circ$.
+    *   Cobertura circular completa mediante la lógica de inversión *back-flip* heredada de la v1.0.
+*   **Resolución de cálculo:** Doble precisión (`double`) para coordenadas astronómicas.
+*   **Velocidad máxima de rampa:** 15°/s para protección mecánica de los actuadores.
+*   **Zona muerta (histéresis):** 0.4° para eliminar oscilaciones y jitter en posición de reposo.
+*   **Frecuencia PWM:** 50 Hz con resolución de 16 bits.
+
+## Lógica de resiliencia y conectividad
+Para garantizar operación continua 24/7 ante fallos parciales o totales de conectividad, el firmware implementa una estrategia de alta disponibilidad en tres niveles:
+
+*   **Nivel 1 — Reconexión automática:** Ante la pérdida de la red principal, el sistema intenta reconectar con backoff exponencial (2 s, 4 s, 8 s... hasta 64 s). Al agotar los reintentos, rota automáticamente al SSID de respaldo 1 y luego al de respaldo 2.
+*   **Nivel 2 — Operación degradada:** Si la conectividad falla por completo, el sistema continúa operando en modo autónomo: calcula la posición solar con los datos GPS o NVS disponibles y mueve los servos con normalidad. La telemetría se reanuda en cuanto se restaura la conexión.
+*   **Nivel 3 — Guardián de hardware:** El TWDT supervisa todas las tareas críticas con un timeout de 10 s. Si alguna tarea se bloquea (por ejemplo, ante un fallo del broker MQTT), el sistema ejecuta un reinicio controlado, garantizando la recuperación automática sin intervención humana.
+
+## Estado del proyecto
+Actualmente, esta versión 2.0 se encuentra en estado **estable y funcional**, validada para operación continua 24/7 en condiciones de campo. Ha cumplido con los objetivos de diseño principales:
+*   **Conectividad robusta:** Triple redundancia WiFi con reconexión autónoma y fail-over transparente entre SSIDs.
+*   **Operación autónoma:** Inercia GPS y persistencia NVS garantizan el seguimiento incluso ante pérdida total de señal satelital.
+*   **Cinemática silenciosa:** Sistema Silky Motion elimina el estrés mecánico en los actuadores y suprime el jitter en posición de reposo.
+*   **Monitoreo científico:** Medición real de potencia (mW) con promediado inteligente para análisis comparativo de eficiencia energética.
+
+## Perspectivas de evolución
+El mapa de ruta para la siguiente iteración (v3.0) se centra en la autonomía total y la movilidad del sistema:
+
+*   **Actualización inalámbrica (OTA):** Implementación de carga de firmware vía WiFi para realizar mejoras y correcciones sin necesidad de acceso físico al dispositivo, facilitando el mantenimiento en instalaciones remotas.
+*   **Sistema de referencia dinámico (fusión de sensores IMU):** Integración de acelerómetro, giroscopio y magnetómetro para operar en condiciones dinámicas (vehículos o embarcaciones), compensando en tiempo real la orientación de la base para mantener el apuntado solar independientemente del movimiento del soporte.
+*   **Algoritmos de auto-calibración por barrido de potencia:** Uso del INA3221 para realizar escaneos de posición alrededor del óptimo calculado. Esta técnica de búsqueda de máximo corregirá desviaciones sistémicas como base no nivelada o errores de alineación con el norte geográfico, garantizando la máxima eficiencia real.
 
 ---
-
-## 🛡️ Estabilidad y Resiliencia (Firmware de Grado Industrial)
-
-### 1. Conectividad Auto-Recuperable
-*   **Triple Redundancia SSID:** Gestión automática entre red Principal y dos de Respaldo.
-*   **Backoff Exponencial:** Estrategia de reintentos (2s a 64s) para proteger la salud de la red.
-*   **Safety Watchdog:** Timeouts de red coordinados (4s) para evitar bloqueos del sistema ante fallos del broker MQTT.
-
-### 2. Operación Degradada Elegante
-*   **Auto-Sanación I2C:** Detección y re-configuración en caliente del sensor de energía sin reinicio del sistema.
-*   **Inercia GPS:** Ante la pérdida de satélites, el sistema mantiene el seguimiento usando el último fix válido y su reloj interno sincronizado.
-
----
-
-## 🚀 Innovaciones Energéticas y Cinéticas
-
-### 1. Sistema "Silky Motion"
-*   **Protección Mecánica:** Rampas de aceleración a **15°/s** que eliminan el estrés en los ejes.
-*   **Eliminación de Jitter:** Filtro de zona muerta de **0.4°** y redondeo PWM robótico para un reposo absoluto y silencioso.
-
-### 2. Análisis de Eficiencia Comparativa
-*   **Promediado Inteligente:** El sistema calcula la potencia media **excluyendo la noche**. Esto permite comparar directamente el rendimiento del panel móvil frente a uno estático sin que el valor de 0W nocturno sesgue el resultado.
-*   **Precisión Científica:** Reporte en milivatios (mW) con resolución de 6 decimales.
-
----
-
-## 🛠 Especificaciones Técnicas
-
-| Periférico | Pin ESP32 | Parámetro | Valor |
-| :--- | :--- | :--- | :--- |
-| **Azimut** | 19 | **Frecuencia PWM** | 50 Hz |
-| **Elevación** | 18 | **Resolución PWM** | 16 bits |
-| **GPS RX** | 17 | **Dead-band** | 0.4° |
-| **I2C Bus** | 21 / 22 | **Umbral Captura** | > 0.1 µW |
-
----
-
-## 📡 Protocolo de Control IoT (`solar/sub`)
-Respuesta robusta a comandos JSON: `set_ser_az`, `set_ser_el`, `set_lat`, `set_vel`. Incluye validación de rangos permisivos (+/- 90.1°) para asegurar la compatibilidad con cualquier deslizador de aplicación móvil.
-
-**Firmware desarrollado sobre ESP-IDF v5.5.3, optimizado para pruebas de campo 24/7.**
-
----
-
-## 🔮 Perspectivas de Evolución: Versión 3.0
-
-El mapa de ruta para la siguiente gran iteración se centra en la autonomía total y la movilidad del sistema:
-
-1.  **Actualización Inalámbrica (OTA - Over-The-Air):** Implementación de carga de firmware vía WiFi. Esto permitirá realizar mejoras y correcciones en la lógica de control sin necesidad de acceso físico al dispositivo, facilitando el mantenimiento en instalaciones remotas o de difícil acceso.
-2.  **Sistema de Referencia Dinámico (Fusión de Sensores IMU):** Integración de acelerómetro, giroscopio y magnetómetro (IMU). El objetivo es evolucionar el seguidor hacia una plataforma capaz de operar en **condiciones dinámicas** (ej. en vehículos o embarcaciones). El sistema compensará en tiempo real el balanceo y la orientación de la base para mantener el panel siempre apuntando al sol, independientemente del movimiento del soporte.
-3.  **Algoritmos de Auto-Calibración por Barrido de Potencia:** Utilizando la alta precisión del INA3221, el seguidor realizará breves escaneos de posición alrededor del objetivo óptimo. Esta técnica de "búsqueda de máximo" servirá para corregir automáticamente desviaciones sistémicas, como una base no perfectamente nivelada o errores en la alineación con el Norte geográfico, garantizando la máxima eficiencia real.
+**Nota:** *Este software se proporciona "tal cual" bajo los términos de la licencia Apache 2.0 de Espressif Systems y está diseñado para aplicaciones de energía renovable y educación técnica.*
