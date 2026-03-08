@@ -60,9 +60,9 @@ El sistema mantiene la cobertura hemisférica completa de la v1.0, añadiendo su
 ## Lógica de resiliencia y conectividad
 Para garantizar operación continua 24/7 ante fallos parciales o totales de conectividad, el firmware implementa una estrategia de alta disponibilidad en tres niveles:
 
-*   **Nivel 1 — Reconexión automática:** Ante la pérdida de la red principal, el sistema intenta reconectar con backoff exponencial (2 s, 4 s, 8 s... hasta 64 s). Al agotar los reintentos, rota automáticamente al SSID de respaldo 1 y luego al de respaldo 2.
+*   **Nivel 1 — Reconexión automática:** Cubre todo tipo de fallo de conectividad de red: desconexión WiFi (pérdida de señal o cambio de punto de acceso), fallo del broker MQTT (timeout, rechazo o caída del servidor) y errores de red transitorios. Ante cualquiera de estos eventos, el sistema intenta reconectar con backoff exponencial (2 s, 4 s, 8 s... hasta 64 s) y, al agotar los reintentos, rota automáticamente al SSID de respaldo 1 y luego al de respaldo 2.
 *   **Nivel 2 — Operación degradada:** Si la conectividad falla por completo, el sistema continúa operando en modo autónomo: calcula la posición solar con los datos GPS o NVS disponibles y mueve los servos con normalidad. La telemetría se reanuda en cuanto se restaura la conexión.
-*   **Nivel 3 — Guardián de hardware:** El TWDT supervisa todas las tareas críticas con un timeout de 10 s. Si alguna tarea se bloquea (por ejemplo, ante un fallo del broker MQTT), el sistema ejecuta un reinicio controlado, garantizando la recuperación automática sin intervención humana.
+*   **Nivel 3 — Guardián de hardware:** El TWDT supervisa todas las tareas críticas con un timeout de 10 s. Si alguna tarea se bloquea de forma irrecuperable, el sistema ejecuta un **reinicio suave** (*soft reset*): el procesador se reinicia pero la memoria NVS en flash se conserva íntegramente. Esto garantiza que los datos de telemetría acumulados (posición GPS, promedios de potencia y configuración) no se pierdan en ningún escenario de fallo.
 
 ## Estado del proyecto
 Actualmente, esta versión 2.0 se encuentra en estado **estable y funcional**, validada para operación continua 24/7 en condiciones de campo. Ha cumplido con los objetivos de diseño principales:
