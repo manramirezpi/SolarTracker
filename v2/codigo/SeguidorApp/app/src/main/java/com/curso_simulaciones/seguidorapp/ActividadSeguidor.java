@@ -155,7 +155,7 @@ public class ActividadSeguidor extends Activity implements Runnable {
         p1Title.setTypeface(null, android.graphics.Typeface.BOLD);
         p1Inst = configLabel("Inst: -- mW");
         p1Avg = configLabel("Med: -- mW");
-        p1Daily = configLabel("Dia: -- mW");
+        p1Daily = configLabel("E: -- mWh");
 
         // Labels Potencia Canal 2
         p2Title = configLabel("PANEL FIJO");
@@ -164,7 +164,7 @@ public class ActividadSeguidor extends Activity implements Runnable {
         p2Title.setTypeface(null, android.graphics.Typeface.BOLD);
         p2Inst = configLabel("Inst: -- mW");
         p2Avg = configLabel("Med: -- mW");
-        p2Daily = configLabel("Dia: -- mW");
+        p2Daily = configLabel("E: -- mWh");
 
         labelEficiencia = configLabel("Ganancia Móvil: -- %");
         labelEficiencia.setTextSize(14);
@@ -803,15 +803,15 @@ public class ActividadSeguidor extends Activity implements Runnable {
         textviewFechaHora.setText(AlmacenDatosRAM.fecha + " " + AlmacenDatosRAM.hora + " | Modo: " + AlmacenDatosRAM.modo);
         textviewAviso.setText(AlmacenDatosRAM.conectado_PubSub);
 
-        // Actualizar Potencia Canal 1 (Ya en mW)
+        // Actualizar Potencia Canal 1
         p1Inst.setText(String.format("Inst: %.4f mW", AlmacenDatosRAM.p1_inst));
         p1Avg.setText(String.format("Med: %.4f mW", AlmacenDatosRAM.p1_avg));
-        p1Daily.setText(String.format("Dia: %.4f mW", AlmacenDatosRAM.p1_avg_dia));
+        p1Daily.setText(String.format("E: %.4f mWh", AlmacenDatosRAM.p1_avg_dia));
 
-        // Actualizar Potencia Canal 2 (Ya en mW)
+        // Actualizar Potencia Canal 2
         p2Inst.setText(String.format("Inst: %.4f mW", AlmacenDatosRAM.p2_inst));
         p2Avg.setText(String.format("Med: %.4f mW", AlmacenDatosRAM.p2_avg));
-        p2Daily.setText(String.format("Dia: %.4f mW", AlmacenDatosRAM.p2_avg_dia));
+        p2Daily.setText(String.format("E: %.4f mWh", AlmacenDatosRAM.p2_avg_dia));
 
         // Cálculo Eficiencia
         if (AlmacenDatosRAM.p2_avg > 0.001f) {

@@ -268,17 +268,18 @@ static float ina_ch2_p = 0.0f;
 #define INA_INTERVALO_MS 300000 // 5 minutos en ms
 
 typedef struct {
-  float buffer[INA_VENTANA_MOVIL]; // buffer circular
+  float buffer[INA_VENTANA_MOVIL]; // buffer circular (para otros futuros análisis)
   int indice;                      // posición actual
-  int count;                       // muestras acumuladas (hasta 288)
+  int count;                       // muestras acumuladas
   float suma;                      // suma acumulada del buffer
-  float promedio_diario;           // promedio móvil actual
+  float energia_acumulada_mwh;     // Integral absoluta ascendente de energía (mWh)
   float ultimo_promedio_5min;      // para detectar congelado
   // acumulador de 5 minutos
   float acum_p;             // suma de potencias válidas en 5 min
   int acum_n;               // cantidad de muestras válidas en 5 min
-  float ultimo_v;           // último voltaje válido (anti-congelado inst.)
-  float ultimo_i;           // última corriente válida (anti-congelado inst.)
+  float ultimo_v;           // último voltaje válido 
+  float ultimo_i;           // última corriente válida
+  int conteo_congelado;     // Contador para descartar bloqueos de hardware lógicos
   int64_t ultimo_tick_5min; // timestamp del último ciclo de 5 min
   int dia_actual;           // para reinicio a medianoche
 } INA_Promedio_t;
@@ -1340,8 +1341,8 @@ static void Publicar_Estado_Rapido_MQTT(void) {
            "}",
            gps_solar_real.azimut, gps_solar_real.elevacion, servo_az_deg,
            servo_el_deg, (ina_ch1_p * 1000.0f),
-           (prom_ch1.promedio_diario * 1000.0f), (ina_ch2_p * 1000.0f),
-           (prom_ch2.promedio_diario * 1000.0f));
+           prom_ch1.energia_acumulada_mwh, (ina_ch2_p * 1000.0f),
+           prom_ch2.energia_acumulada_mwh);
 
   esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC_PUB_FAST, json, 0, 0, 0);
 }
@@ -1491,12 +1492,13 @@ static void Procesar_Comando_MQTT(const char *datos, int len) {
     sys_ctrl.usar_fecha_manual = 0;
     sys_ctrl.servo_manual = 0;
     
-    // Purga de colas y objetivos: fuerza a sincronizar de inmediato
-    // el objetivo con el físico para cortar de raíz los retardos remanentes
-    pos_obj_az = pos_actual_az;
-    pos_obj_el = pos_actual_el;
+    // Recálculo INMEDIATO: Forzamos la actualización astronómica en el mismo ciclo de CPU
+    // saltando la cola de la tarea principal.
+    Actualizar_Coordenadas_Calculo();
+    Calcular_Posicion_Solar(&gps_solar);
+    Actualizar_Servos();
     
-    ESP_LOGI(TAG, "MQTT: Reset a modo GPS");
+    ESP_LOGI(TAG, "MQTT: Reset a modo GPS. Nuevo destino calculado al instante.");
   }
   // 3. COMANDOS: FIJAR UBICACIÓN VIRTUAL (TESTING EN INTERIORES)
   else if (strncmp(cmd_ptr, "set_lat", 7) == 0) {
@@ -1512,6 +1514,12 @@ static void Procesar_Comando_MQTT(const char *datos, int len) {
       sys_ctrl.lat_manual = valor;
       sys_ctrl.usar_lat_manual = 1;
       sys_ctrl.servo_manual = 0; // salir de modo servo manual
+
+      // Recálculo INMEDIATO para asegurar pivote cinemático sin desfase
+      Actualizar_Coordenadas_Calculo();
+      Calcular_Posicion_Solar(&gps_solar);
+      Actualizar_Servos();
+
       ESP_LOGI(TAG, "MQTT: Latitud manual = %.5f", valor);
     }
   } else if (strncmp(cmd_ptr, "set_lon", 7) == 0) {
@@ -1527,6 +1535,12 @@ static void Procesar_Comando_MQTT(const char *datos, int len) {
       sys_ctrl.lon_manual = valor;
       sys_ctrl.usar_lon_manual = 1;
       sys_ctrl.servo_manual = 0;
+
+      // Recálculo INMEDIATO para asegurar pivote cinemático sin desfase
+      Actualizar_Coordenadas_Calculo();
+      Calcular_Posicion_Solar(&gps_solar);
+      Actualizar_Servos();
+
       ESP_LOGI(TAG, "MQTT: Longitud manual = %.5f", valor);
     }
   }
@@ -1567,13 +1581,15 @@ static void Procesar_Comando_MQTT(const char *datos, int len) {
       sys_ctrl.ser_el_manual = pos_actual_el;
       
       sys_ctrl.ser_az_manual = valor;
+      pos_obj_az = valor; // Inyectar directamente al lazo cinemático de 50Hz
+      
       // Primero actualizamos el valor, luego el modo para que tarea_principal
       // lo encuentre listo
       sys_ctrl.servo_manual = 1;
       // Marcamos como sincronizado para evitar que tarea_principal sobreescriba
       // el joystick con la posición anterior en el primer ciclo
       servo_manual_anterior = true;
-      ESP_LOGI(TAG, "MQTT: Servo AZ manual = %.2f", valor);
+      ESP_LOGI(TAG, "MQTT: Servo AZ manual = %.2f (Pivote forzado)", valor);
     }
   } else if (strncmp(cmd_ptr, "set_ser_el", 10) == 0) {
     char *val_ptr = strstr(buf, "\"valor\"");
@@ -1589,9 +1605,11 @@ static void Procesar_Comando_MQTT(const char *datos, int len) {
       sys_ctrl.ser_az_manual = pos_actual_az;
       
       sys_ctrl.ser_el_manual = valor;
+      pos_obj_el = valor; // Inyectar directamente al lazo cinemático de 50Hz
+      
       sys_ctrl.servo_manual = 1;
       servo_manual_anterior = true;
-      ESP_LOGI(TAG, "MQTT: Servo EL manual = %.2f", valor);
+      ESP_LOGI(TAG, "MQTT: Servo EL manual = %.2f (Pivote forzado)", valor);
     }
   }
 }
@@ -1745,7 +1763,7 @@ static void ina_actualizar_promedio(INA_Promedio_t *p, float v, float i,
     p->indice = 0;
     p->count = 0;
     p->suma = 0.0f;
-    p->promedio_diario = 0.0f;
+    p->energia_acumulada_mwh = 0.0f;
     p->ultimo_promedio_5min = -1.0f;
     p->acum_p = 0.0f;
     p->acum_n = 0;
@@ -1758,19 +1776,31 @@ static void ina_actualizar_promedio(INA_Promedio_t *p, float v, float i,
     p->dia_actual = tiempo_local.dia;
   }
 
-  // Nivel 1: ACUMULACIÓN SELECTIVA (Filtro de Relevancia Estadística)
-  // Solo promediamos si hay producción real (>0.1uW) y el dato ha cambiado.
-  // Esto último evita procesar 3 veces la misma conversión del ADC (tarda
-  // ~280ms).
+  // Nivel 1: ACUMULACIÓN SELECTIVA
+  // Solo promediamos si hay producción real (>0.1uW)
   float p_inst = v * i;
   if (valido && p_inst > 0.0000001f) {
-    bool congelado = (v == p->ultimo_v && i == p->ultimo_i && p->acum_n > 0);
-    if (!congelado) {
+    bool mismo_dato = (v == p->ultimo_v && i == p->ultimo_i);
+    
+    // Si el bus I2C devuelve exactamente los mismos bits de V e I
+    if (mismo_dato) {
+        p->conteo_congelado++;
+    } else {
+        p->conteo_congelado = 0; // Se recuperó, cambió aunque sea 1 LSB
+        p->ultimo_v = v;
+        p->ultimo_i = i;
+    }
+
+    // Tolerancia robusta: En días muy nublados el ADC puede reportar valores
+    // idénticos varias veces, confiamos en ellos gracias al bit 'Conversion Ready'.
+    // PERO si se repiten más de 20 veces (~2 segundos de datos repetidos a 10Hz), 
+    // asumimos que el I/O interno del sensor se trabó congelando buffers.
+    if (p->conteo_congelado < 20) {
       p->acum_p += p_inst;
       p->acum_n++;
-      p->ultimo_v = v;
-      p->ultimo_i = i;
     }
+  } else {
+      p->conteo_congelado = 0; // Reset si entra en noche o data errónea
   }
 
   // Nivel 2: Cada 5 minutos calcular promedio del bloque y alimentar media
@@ -1799,9 +1829,13 @@ static void ina_actualizar_promedio(INA_Promedio_t *p, float v, float i,
         p->suma = p->suma - valor_saliente + promedio_5min;
       }
 
-      // 'promedio_diario' representa ahora el rendimiento medio mientras hubo
-      // luz
-      p->promedio_diario = p->suma / (float)p->count;
+      // INTEGRACIÓN ABSOLUTA A ENERGÍA (mWh):
+      // A diferencia del promedio móvil, la energía total generada en un día
+      // nunca "sale de la ventana", solo se acumula iterativamente.
+      // E_Tramo = P_Media_Tramo * tiempo_tramo
+      // tiempo_tramo = 5 minutos = 1/12 horas.
+      float energia_tramo_mwh = (promedio_5min * 1000.0f) / 12.0f;
+      p->energia_acumulada_mwh += energia_tramo_mwh;
     }
 
     // Reiniciar acumulador para el próximo bloque de 5 minutos
