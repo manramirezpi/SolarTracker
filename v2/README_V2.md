@@ -30,7 +30,7 @@ Lo que en la v1.0 eran perspectivas de evolución, en la v2.0 es una realidad fu
 El firmware está estructurado sobre ESP-IDF v5.5.3 con arquitectura multitarea (FreeRTOS), destacando los siguientes módulos:
 
 1.  **Capa de conectividad:** Gestión WiFi con reconexión automática por backoff exponencial y rotación entre tres SSIDs de respaldo. Comunicación MQTT bidireccional con timeout de red coordinado al TWDT.
-2.  **Motor de procesamiento GPS:** Parseo de tramas NMEA ($GPRMC) con mecanismo de inercia: ante pérdida de señal, el sistema opera con el último fix valido. En caso de no tener aún se usa el rescatado desde NVS.
+2.  **Motor de procesamiento GPS:** Parseo de tramas NMEA ($GPRMC) con mecanismo de inercia: ante pérdida de señal, el sistema opera con el último fix valido. En caso de no tener aún, se usa el rescatado desde NVS.
 3.  **Sistema de medición energética:** Lectura del sensor INA3221 vía I2C con capacidad de auto-sanación ante fallos en el bus. Acumulación en buffer circular para cálculo de media móvil de 24 horas.
 4.  **Capa de actuación (Silky Motion):** Generación de señales PWM de 16 bits a 50 Hz con lógica de rampas de velocidad y zona muerta configurable para eliminar jitter y proteger los actuadores.
 5.  **Guardián del sistema (TWDT):** Task Watchdog Timer configurado a 10 s, suscrito a todas las tareas críticas, con alimentación periódica que garantiza la detección y recuperación ante bloqueos.
