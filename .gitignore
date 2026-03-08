@@ -1,25 +1,108 @@
-# ESP-IDF specific build outputs
+# =============================================================================
+#  SolarTracker — .gitignore
+#  Cubre: STM32CubeIDE (v1), ESP-IDF (v2/codigo/esp32), Android Studio (v2/codigo/app)
+# =============================================================================
+
+
+# ─── ESP-IDF (v2/codigo/esp32) ───────────────────────────────────────────────
+
+# Directorio de compilación (binarios, objetos, mapas, ninja, etc.)
 build/
 **/build/
+
+# Binarios compilados
 *.bin
 *.elf
 *.map
-flasher_args.json
-sdkconfig.old
 
-# ESP-IDF dependencies
+# Archivos de configuración generados por el proceso de build
+sdkconfig.old
+flasher_args.json
+config.env
+project_description.json
+project_elf_src_*.c
+*.ninja
+.ninja_deps
+.ninja_log
+.bin_timestamp
+flash_args
+flash_args.in
+flash_app_args
+flash_bootloader_args
+flash_project_args
+app-flash_args
+bootloader-flash_args
+partition-table-flash_args
+ldgen_libraries
+ldgen_libraries.in
+kconfigs.in
+kconfigs_projbuild.in
+x509_crt_bundle.S
+
+# Dependencias gestionadas por ESP-IDF Component Manager
 managed_components/
 dependencies.lock
+
+# Toolchain y entorno ESP-IDF local (instalación del usuario, no del proyecto)
 .espressif/
 
-# CMake generated files
+# CMake
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
 install_manifest.txt
 CTestTestfile.cmake
+compile_commands.json
 
-# Python environment files
+
+# ─── STM32CubeIDE (v1/codigo) ────────────────────────────────────────────────
+
+# Carpetas de salida del compilador (objetos, ELF, mapas, listas)
+Debug/
+Release/
+
+# Archivos generados por el linker y el compilador
+*.o
+*.d
+*.lst
+*.list
+*.su
+makefile
+objects.list
+objects.mk
+sources.mk
+subdir.mk
+
+# Metadatos del workspace Eclipse/STM32CubeIDE (locales al desarrollador)
+.metadata/
+.settings/
+*.launch
+
+
+# ─── Android Studio (v2/codigo/app) ──────────────────────────────────────────
+
+# Directorio de build de Gradle
+.gradle/
+**/build/
+
+# Archivos locales del desarrollador (rutas de SDK, configuración local)
+local.properties
+*.iml
+.idea/
+*.iml
+
+# APK y AAB — distribuir vía GitHub Releases, no en el repositorio
+*.apk
+*.aab
+
+# Archivos de caché de Android Studio
+captures/
+.externalNativeBuild/
+.cxx/
+*.hprof
+
+
+# ─── Python (scripts de ESP-IDF o utilidades) ────────────────────────────────
 *.pyc
 *.pyo
 *.pyd
@@ -28,28 +111,22 @@ venv/
 .venv/
 env/
 
-# IDE & Language Servers
+
+# ─── Language Servers e IDEs generales ───────────────────────────────────────
 .clangd/
 .ccls-cache/
-compile_commands.json
 .vscode/ipch/
 .vscode/.browse.vc.db
 .vscode/project_samples.json
 
-# Toolchain specific
-Debug/
-Release/
-.settings/
-*.launch
-.metadata/
 
-# System & OS files
+# ─── Sistema operativo ───────────────────────────────────────────────────────
 .DS_Store
 .directory
+Thumbs.db
+ehthumbs.db
+Desktop.ini
 *~
 *.swp
 *.bak
 *.log
-Thumbs.db
-ehthumbs.db
-Desktop.ini
