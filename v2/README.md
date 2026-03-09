@@ -51,7 +51,7 @@ El firmware está estructurado sobre ESP-IDF v5.5.3 con arquitectura multitarea 
 El sistema mantiene la cobertura hemisférica completa de la v1.0, añadiendo suavidad cinemática y análisis energético:
 
 *   **Rango de elevación:** $0^\circ$ a $90^\circ$.
-    *   El algoritmo detecta elevaciones negativas (noche), deteniendo el movimiento en esta componente y excluyendo la medición del promedio diario de potencia.
+    *   El algoritmo detecta elevaciones negativas (noche), deteniendo el movimiento en esta componente y suspendiendo la acumulación de la energía diaria.
 *   **Rango de azimut:** $0^\circ$ a $360^\circ$.
     *   Cobertura circular completa mediante la lógica de inversión *back-flip* heredada de la v1.0.
 *   **Resolución de cálculo:** Doble precisión (`double`) para coordenadas astronómicas.
@@ -71,7 +71,7 @@ Actualmente, esta versión 2.0 se encuentra en estado **estable y funcional**, v
 *   **Conectividad robusta:** Triple redundancia WiFi con reconexión autónoma y fail-over transparente entre SSIDs.
 *   **Operación autónoma:** La inercia GPS y la persistencia NVS garantizan el seguimiento de posición solar incluso ante pérdida total de señal satelital, sin interrumpir el resto de las tareas ni el estado del sistema en RAM.
 *   **Cinemática silenciosa:** Sistema Silky Motion elimina el estrés mecánico en los actuadores y suprime el jitter en posición de reposo.
-*   **Monitoreo científico:** Medición real de potencia (mW) con promediado de alta reactividad en la aplicación y filtros inteligentes en hardware (detección asíncrona de cambio de día) para garantizar un análisis de gran fidelidad en la eficiencia energética.
+*   **Monitoreo científico:** Medición real de potencia instantánea en milivatios (mW) e integración absoluta de energía acumulada diaria en milivatios-hora (mWh). Cuenta con promediado de alta reactividad en la aplicación y filtros inteligentes en hardware (detección asíncrona de cambio de día) garantizando legibilidad en prototipos de baja escala y alta fidelidad en la eficiencia energética.
 
 ## Perspectivas de evolución
 El mapa de ruta para la siguiente iteración (v3.0) se centra en la autonomía total y la movilidad del sistema:
