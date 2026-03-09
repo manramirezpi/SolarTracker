@@ -41,3 +41,6 @@ graph TD;
 3. **Inercias y Promedios Móviles:** Las métricas de promedio de potencia que muestran los medidores ("gauges") se calculan con un _Buffer Circular_. Esto lo maneja individualmente la clase `ProcesadorTelemetria`, la cual garantiza que el promedio mantenga una media asíncrona real basada en un histórico de las medidas que entran, logrando que sea sumamente fluido verlo en la pantalla sin estrés en el sistema.
 
 4. **Componentización de la Vista:** `GeneradorUI` separa enteramente la declaración y estilización de colores, tipografías y `LinearLayout`. Si el día de mañana deseas migrar esta versión a, por ejemplo, Jetpack Compose o simplemente rediseñar por temas o pantallas, sólo la clase GeneradorUI recibirá los cambios.
+
+---
+> **Nota de Desarrollo:** *La arquitectura, optimización de memoria y el diseño visual han sido desarrolladas con ayuda y asistencia de modelos avanzados de Inteligencia Artificial (LLMs y Generadores de Imagen).*

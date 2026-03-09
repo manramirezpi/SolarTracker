@@ -81,4 +81,7 @@ El mapa de ruta para la siguiente iteración (v3.0) se centra en la autonomía t
 *   **Algoritmos de auto-calibración por barrido de potencia:** Uso del INA3221 para realizar escaneos de posición alrededor del óptimo calculado. Esta técnica de búsqueda de máximo corregirá desviaciones sistémicas como base no nivelada o errores de alineación con el norte geográfico, garantizando la máxima eficiencia real.
 
 ---
-**Nota:** *Este software se proporciona "tal cual" bajo los términos de la licencia Apache 2.0 de Espressif Systems y está diseñado para aplicaciones de energía renovable y educación técnica.*
+---
+> **Nota de Licencia:** *Este software se proporciona "tal cual" bajo los términos de la licencia Apache 2.0 de Espressif Systems y está diseñado para aplicaciones de energía renovable y educación técnica.*
+> 
+> **Nota de Desarrollo Asistido:** *Algunas de las nuevas funcionalidades (v2.0), arquitectura, y la revisión de código fueron optimizadas con ayuda de modelos de Inteligencia Artificial como herramientas de co-piloto de desarrollo.*
