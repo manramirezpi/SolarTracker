@@ -52,7 +52,7 @@ El firmware está estructurado sobre ESP-IDF v5.5.3 con arquitectura multitarea 
 El sistema mantiene la cobertura hemisférica completa de la v1.0, añadiendo suavidad cinemática y análisis energético:
 
 *   **Rango de elevación:** $0^\circ$ a $90^\circ$.
-    *   El algoritmo detecta elevaciones negativas (noche), deteniendo el movimiento en esta componente y excluyendo la medición del promedio diario de potencia.
+    *   El algoritmo detecta elevaciones negativas (noche), deteniendo el movimiento en esta componente y suspendiendo la acumulación de la energía diaria.
 *   **Rango de azimut:** $0^\circ$ a $360^\circ$.
     *   Cobertura circular completa mediante la lógica de inversión *back-flip* heredada de la v1.0.
 *   **Resolución de cálculo:** Doble precisión (`double`) para coordenadas astronómicas.
@@ -82,4 +82,7 @@ El mapa de ruta para la siguiente iteración (v3.0) se centra en la autonomía t
 *   **Algoritmos de auto-calibración por barrido de potencia:** Uso del INA3221 para realizar escaneos de posición alrededor del óptimo calculado. Esta técnica de búsqueda de máximo corregirá desviaciones sistémicas como base no nivelada o errores de alineación con el norte geográfico, garantizando la máxima eficiencia real.
 
 ---
-**Nota:** *Este software se proporciona "tal cual" bajo los términos de la licencia Apache 2.0 de Espressif Systems y está diseñado para aplicaciones de energía renovable y educación técnica.*
+---
+> **Nota de Licencia:** *Este software se proporciona "tal cual" bajo los términos de la licencia Apache 2.0 de Espressif Systems y está diseñado para aplicaciones de energía renovable y educación técnica.*
+> 
+> **Nota de Desarrollo Asistido:** *Algunas de las nuevas funcionalidades (v2.0), arquitectura, y la revisión de código fueron optimizadas con ayuda de modelos de Inteligencia Artificial como herramientas de co-piloto de desarrollo.*
