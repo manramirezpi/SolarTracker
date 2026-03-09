@@ -665,19 +665,20 @@ static void tarea_medicion_ina(void *arg) {
     bool ch1_ok = ina3221_leer_canal(1, &v1, &i1);
     bool ch2_ok = ina3221_leer_canal(2, &v2, &i2);
 
-    // ESCALAMIENTO / HOMOLOGACIÓN DE PANELES
+    // ESCALAMIENTO / HOMOLOGACIÓN DE PANELES (DESHABILITADO PARA CALIBRACIÓN)
     // En el hardware real se utilizan paneles con rendimientos dispares:
     // Panel 1 (móvil): Carga de 56 ohms, max ~420 mW
     // Panel 2 (fijo): Carga de 40.2 ohms, max ~520 mW
     // Para que el análisis de eficiencia (Ganancia del Tracker) sea netamente 
     // producto de la irradiación solar angular y no de la disparidad estática, 
-    // se escala matemáticamente el panel de menor producción (Panel 1) antes de 
-    // enviar los datos al motor de integración.
+    // se escalará matemáticamente el panel de menor producción (Panel 1).
+    //
+    // [MODO CALIBRACIÓN ACTIVO]: Actualmente se deshabilitó el factor lineal 
+    // `(* 1.238)` para permitir capturar pares de datos RAW (No Lineales) 
+    // y generar una curva de transferencia polinómica de grado 2 real.
     if (ch1_ok) {
-        // Multiplicamos la corriente por el factor de corrección (520/420)
-        // ya que P = V * I. Esto dejará el voltaje de lectura puro para diagnóstico,
-        // pero normalizará la potencia absoluta del sistema.
-        i1 = i1 * (520.0f / 420.0f);
+        // Multiplicamos la corriente por el factor de corrección (Diferido)
+        // i1 = i1 * (520.0f / 420.0f);
     }
 
     // Si ambos canales fallan la lectura de datos tras bus OK (ruido masivo)
