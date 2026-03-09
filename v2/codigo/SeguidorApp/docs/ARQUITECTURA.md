@@ -14,23 +14,23 @@ Esto significa que, a diferencia de diseños monolíticos, cada componente del c
 graph TD;
     Red((Red WiFi/Datos)) -- MQTT 5Hz --> ClientePubSubMQTT;
 
-    subgraph Paquete: Comunicaciones
+    subgraph "Paquete: Comunicaciones"
         ClientePubSubMQTT[ClientePubSubMQTT] -- "Agrega String a la Cola" --> Buffer[Cola de Mensajes Concurrentes];
     end
 
     subgraph Controlador
-        ActividadSeguidor[ActividadSeguidor (Main Thread)] 
+        ActividadSeguidor["ActividadSeguidor (Main Thread)"] 
     end
 
     Buffer -- "Hilo Secundario\n (run loop de 50ms)" --> ActividadSeguidor;
 
-    subgraph Paquete: Datos
-        ActividadSeguidor -- "Extraer Fast/Slow" --> ProcesadorTelemetria[ProcesadorTelemetria (Parser)];
+    subgraph "Paquete: Datos"
+        ActividadSeguidor -- "Extraer Fast/Slow" --> ProcesadorTelemetria["ProcesadorTelemetria (Parser)"];
         ProcesadorTelemetria -- "Actualiza Variables" --> AlmacenDatosRAM[(AlmacenDatosRAM)];
     end
 
-    subgraph Paquete: Utilidades
-        GeneradorUI[GeneradorUI (Vista)]
+    subgraph "Paquete: Utilidades"
+        GeneradorUI["GeneradorUI (Vista)"]
     end
 
     ActividadSeguidor -- "Lee estados para UI" --> AlmacenDatosRAM;
