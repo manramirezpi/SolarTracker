@@ -38,14 +38,14 @@ static const char *TAG = "SOLAR";
 // #define WIFI_SSID "3210NX"
 // #define WIFI_PASSWORD "71671878"
 
-#define WIFI_SSID "JP"
-#define WIFI_PASSWORD "551964jp"
+#define WIFI_SSID "3210NX"
+#define WIFI_PASSWORD "71671878"
 
 #define WIFI_BACKUP_SSID "321onx_REP"
 #define WIFI_BACKUP_PASSWORD "71671878"
 
-#define WIFI_BACKUP2_SSID "MI_RED_TERCIARIA"
-#define WIFI_BACKUP2_PASSWORD "12345678"
+#define WIFI_BACKUP2_SSID "..."
+#define WIFI_BACKUP2_PASSWORD "123456789"
 
 #define MQTT_BROKER_URL "45.56.74.248"
 #define MQTT_BROKER_PORT 1883
@@ -664,6 +664,21 @@ static void tarea_medicion_ina(void *arg) {
     // Adquisición de voltajes de bus y shunt vía bus I2C
     bool ch1_ok = ina3221_leer_canal(1, &v1, &i1);
     bool ch2_ok = ina3221_leer_canal(2, &v2, &i2);
+
+    // ESCALAMIENTO / HOMOLOGACIÓN DE PANELES
+    // En el hardware real se utilizan paneles con rendimientos dispares:
+    // Panel 1 (móvil): Carga de 56 ohms, max ~420 mW
+    // Panel 2 (fijo): Carga de 40.2 ohms, max ~520 mW
+    // Para que el análisis de eficiencia (Ganancia del Tracker) sea netamente 
+    // producto de la irradiación solar angular y no de la disparidad estática, 
+    // se escala matemáticamente el panel de menor producción (Panel 1) antes de 
+    // enviar los datos al motor de integración.
+    if (ch1_ok) {
+        // Multiplicamos la corriente por el factor de corrección (520/420)
+        // ya que P = V * I. Esto dejará el voltaje de lectura puro para diagnóstico,
+        // pero normalizará la potencia absoluta del sistema.
+        i1 = i1 * (520.0f / 420.0f);
+    }
 
     // Si ambos canales fallan la lectura de datos tras bus OK (ruido masivo)
     if (!ch1_ok && !ch2_ok) {

@@ -23,7 +23,8 @@ Lo que en la v1.0 eran perspectivas de evolución, en la v2.0 es una realidad fu
 - **Auto-sanación I2C:** Detección y reconfiguración en caliente del sensor de energía INA3221 sin reinicio del sistema.
 - **Inercia GPS:** Ante la pérdida de satélites, el sistema mantiene el seguimiento usando las últimas coordenadas válidas disponibles en RAM. Al arranque, si aún no hay señal GPS, se recuperan las coordenadas de la sesión anterior desde NVS (memoria no volátil).
 - **Sistema Silky Motion:** Rampas de aceleración limitadas a 15°/s y zona muerta de 0.4° para movimiento suave, silencioso y sin estrés mecánico.
-- **Análisis de eficiencia comparativa:** Media móvil de 24 horas con exclusión nocturna, para comparación objetiva entre panel móvil y panel estático sin sesgo por lecturas de 0 W.
+- **Análisis de eficiencia comparativa:** Integración absoluta de energía (mWh) en lugar de media móvil con exclusión nocturna, para comparación objetiva directa de energía útil generada.
+- **Homologación de Paneles por Escalamiento:** Escalamiento matemático automatizado `(* 1.238)` inyectado en la lectura de corriente del panel móvil para compensar asimetrías de hardware (56 ohms vs 40.2 ohms, de 420 mW a 520 mW), permitiendo determinar eficiencias relativas a causa únicamente de la cinemática de seguimiento.
 - **Telemetría Multinivel (Mqtt High-Speed):** División del flujo de datos en dos canales independientes: un canal rápido a 5 Hz para sincronización perfecta con clientes móviles (200 ms) y un canal lento a 1 Hz para información administrativa y de GPS.
 - **Validación por Checksum XOR:** Blindaje total contra ruido eléctrico en el bus serie mediante la verificación de la suma de comprobación estándar NMEA-0183, descartando tramas GPS corruptas.
 - **Reactividad Instantánea (Inyección Cinemática):** Cancelación inmediata de trayectorias en curso al recibir nuevas órdenes desde la App. Los destinos astronómicos o manuales se inyectan sin latencias directamente en el lazo de 50 Hz, permitiendo pivotes impecables.
@@ -71,7 +72,7 @@ Actualmente, esta versión 2.0 se encuentra en estado **estable y funcional**, v
 *   **Conectividad robusta:** Triple redundancia WiFi con reconexión autónoma y fail-over transparente entre SSIDs.
 *   **Operación autónoma:** La inercia GPS y la persistencia NVS garantizan el seguimiento de posición solar incluso ante pérdida total de señal satelital, sin interrumpir el resto de las tareas ni el estado del sistema en RAM.
 *   **Cinemática silenciosa:** Sistema Silky Motion elimina el estrés mecánico en los actuadores y suprime el jitter en posición de reposo.
-*   **Monitoreo científico:** Medición real de potencia (mW) con promediado de alta reactividad en la aplicación y filtros inteligentes en hardware (detección asíncrona de cambio de día) para garantizar un análisis de gran fidelidad en la eficiencia energética.
+*   **Monitoreo científico:** Medición real y normalizada de potencia (mW) con escaneos homologados (compensando paneles estáticos y móviles dispares). Cuenta además con la generación de un acumulador integral ascendente (mWh) con filtros anti-congelamiento asistidos por hardware, logrando un análisis de gran fidelidad en investigación energética.
 
 ## Perspectivas de evolución
 El mapa de ruta para la siguiente iteración (v3.0) se centra en la autonomía total y la movilidad del sistema:
