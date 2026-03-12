@@ -1,6 +1,12 @@
 package com.curso_simulaciones.seguidorapp.datos;
 
 import org.json.JSONObject;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
+import android.content.Context;
 
 /**
  * Especialista en decodificar secuencias String del protocolo MQTT 
@@ -18,12 +24,11 @@ public class ProcesadorTelemetria {
         primeraVez = true;
     }
 
-    public boolean procesarDato(String data) {
+    public boolean procesarDato(String data, Context context) {
         try {
-            // DETECCIÓN DE REPORTE DE CALIBRACIÓN (.txt simulado)
-            if (data.contains("\"file\":")) {
-                android.util.Log.i("CALIBRACION", "Recibido reporte de lecturas RAW:");
-                android.util.Log.i("CALIBRACION", data);
+            // DETECCIÓN DE LOTE DE DATOS (Calibración)
+            if (data.contains("\"batch\":")) {
+                guardarBatchTxt(data, context);
                 return false; 
             }
 
@@ -148,5 +153,28 @@ public class ProcesadorTelemetria {
         if (count == 0) return 0;
         float suma = esCanal1 ? AlmacenDatosRAM.sumaP1 : AlmacenDatosRAM.sumaP2;
         return suma / count;
+    }
+
+    private void guardarBatchTxt(String jsonStr, Context context) {
+        try {
+            JSONObject obj = new JSONObject(jsonStr);
+            String content = obj.optString("data", "");
+            
+            // Guardamos en la carpeta de archivos del sistema
+            File folder = context.getExternalFilesDir(null);
+            String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
+            File file = new File(folder, "batch_potencia_" + timeStamp + ".txt");
+            
+            FileOutputStream out = new FileOutputStream(file);
+            out.write(content.getBytes());
+            out.close();
+            
+            AlmacenDatosRAM.conectado_PubSub = "Archivo guardado: " + file.getName();
+            android.util.Log.i("TELEMETRIA", "Lote guardado en: " + file.getAbsolutePath());
+            
+        } catch (Exception e) {
+            e.printStackTrace();
+            AlmacenDatosRAM.conectado_PubSub = "Error al guardar lote .txt";
+        }
     }
 }

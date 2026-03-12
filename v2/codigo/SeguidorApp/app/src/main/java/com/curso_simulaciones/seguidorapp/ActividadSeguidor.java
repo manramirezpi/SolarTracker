@@ -226,7 +226,7 @@ public class ActividadSeguidor extends Activity implements Runnable {
                 // Drena la cola completamente antes de actualizar la UI
                 // Esto garantiza que el reloj avance a saltos exactos sin retrasos por acumulación
                 while ((data = cliente.leerString()) != null) {
-                    if (procesadorTelemetria.procesarDato(data)) {
+                    if (procesadorTelemetria.procesarDato(data, this)) {
                         myHandler.post(this::sincronizarControles); // Handler nativo para tocar la UI
                     }
                     uiRequiereUpdate = true;

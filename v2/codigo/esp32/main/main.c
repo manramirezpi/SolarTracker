@@ -254,13 +254,12 @@ static float ina_ch2_v = 0.0f;
 static float ina_ch2_i = 0.0f;
 static float ina_ch2_p = 0.0f;
 
-// ─── CAPTURA TEMPORAL PARA CALIBRACIÓN (25 LECTURAS) ─────────────────────────
-#define CALIB_SIZE 25
-static float calib_ch1[CALIB_SIZE];
-static float calib_ch2[CALIB_SIZE];
-static float last_calib_p1 = -1000.0f; // Forzar captura de la primera muestra
-static volatile int calib_count = 0;
-static volatile bool calib_enviado = false;
+// ─── CAPTURA TEMPORAL PARA CALIBRACIÓN (BATCH 25) ────────────────────────────
+#define BATCH_SIZE 25
+static float batch_ch1[BATCH_SIZE];
+static float batch_ch2[BATCH_SIZE];
+static int batch_count = 0;
+static float last_batch_p1 = -100.0f;
 
 // ─── FILTRO DIGITAL DE DOBLE ETAPA (INA3221) ─────────────────────────────────
 // Estructura para el procesamiento y estabilización de telemetría de potencia.
@@ -323,7 +322,7 @@ static void mqtt_init(void);
 static void tarea_gps(void *arg);
 static void tarea_principal(void *arg);
 static void timer_movimiento_callback(void *arg);
-static void Publicar_Debug_Calib_MQTT(void);
+static void Publicar_Batch_Potencia_MQTT(void);
 
 // ─── Prototipos INA3221 ──────────────────────────────────────────────────────
 static esp_err_t ina3221_write_reg(uint8_t reg, uint16_t value);
@@ -595,10 +594,11 @@ static void tarea_principal(void *arg) {
       }
 
       // Despacho de captura de calibración (Una sola vez cuando esté listo)
-      if (calib_count >= CALIB_SIZE && !calib_enviado) {
-        Publicar_Debug_Calib_MQTT();
-        calib_enviado = true;
-        ESP_LOGI(TAG, "Debug: Reporte de 25 lecturas enviado exitosamente.");
+      if (batch_count >= BATCH_SIZE) { // Check if batch is full
+        Publicar_Batch_Potencia_MQTT();
+        batch_count = 0; // Reset batch count after publishing
+        last_batch_p1 = -100.0f; // Reset last power for new batch
+        ESP_LOGI(TAG, "Debug: Reporte de batch de potencia enviado exitosamente.");
       }
     } else {
       // Si no hay MQTT, el heartbeat se mide en ciclos de 100ms (50 = 5s)
@@ -737,18 +737,22 @@ static void tarea_medicion_ina(void *arg) {
     ina_actualizar_promedio(&prom_ch1, v1, i1, ch1_ok);
     ina_actualizar_promedio(&prom_ch2, v2, i2, ch2_ok);
 
-    // Captura por barrido (40mW delta) para calibración (25 muestras)
-    if (ch1_ok && ch2_ok && calib_count < CALIB_SIZE) {
+    // Captura por barrido (40mW delta) para calibración (BATCH 256)
+    if (ch1_ok && ch2_ok && batch_count < BATCH_SIZE) {
         float p1_ahora = v1 * i1 * 1000.0f;
         float p2_ahora = v2 * i2 * 1000.0f;
         
-        // Filtro representativo: Diferencia absoluta > 40 mW respecto al último punto
-        if (fabsf(p1_ahora - last_calib_p1) >= 40.0f) {
-            calib_ch1[calib_count] = p1_ahora;
-            calib_ch2[calib_count] = p2_ahora;
-            last_calib_p1 = p1_ahora;
-            calib_count++;
-            ESP_LOGD(TAG, "Calib: Guardado punto %d (P1=%.1f mW, P2=%.1f mW)", calib_count, p1_ahora, p2_ahora);
+        // Filtro: Diferencia absoluta > 40 mW respecto al último punto guardado
+        if (fabsf(p1_ahora - last_batch_p1) >= 40.0f) {
+            batch_ch1[batch_count] = p1_ahora;
+            batch_ch2[batch_count] = p2_ahora;
+            last_batch_p1 = p1_ahora;
+            batch_count++;
+            
+            if (batch_count == BATCH_SIZE) {
+                ESP_LOGI("INA", "Batch de potencia lleno. Enviando...");
+                // Podríamos disparar el envío automático aquí si se desea
+            }
         }
     }
   }
@@ -1424,24 +1428,32 @@ static void Publicar_Estado_Lento_MQTT(void) {
   esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC_PUB_SLOW, json, 0, 0, 0);
 }
 
-// ─── FUNCIÓN DEBUG: ENVÍO DE "ARCHIVO" DE CALIBRACIÓN ────────────────────────
-static void Publicar_Debug_Calib_MQTT(void) {
-    if (!mqtt_client) return;
+// ─── FUNCIÓN BATCH: ENVÍO DE DATOS DE POTENCIA ACUMULADOS ────────────────────
+static void Publicar_Batch_Potencia_MQTT(void) {
+    if (!mqtt_client || batch_count == 0) return;
     
-    // Alarma dinámica: 25 pares + cabeceras (aprox 800 bytes)
-    char *json_buff = malloc(1200);
+    // Alarma dinámica: 256 pares + cabeceras (aprox 5-6KB)
+    // Usamos heap para no saturar stack
+    char *json_buff = malloc(6144); 
     if (!json_buff) return;
 
-    int pos = snprintf(json_buff, 1200, "{\"file\":\"calib_25_lecturas.txt\",\"content\":\"P1(mW),P2(mW)\\n");
+    int pos = snprintf(json_buff, 6144, "{\"batch\":%d,\"data\":\"P1(mW),P2(mW)\\n", batch_count);
     
-    for (int i = 0; i < CALIB_SIZE; i++) {
-        pos += snprintf(json_buff + pos, 1200 - pos, "%.4f,%.4f\\n", calib_ch1[i], calib_ch2[i]);
+    for (int i = 0; i < batch_count; i++) {
+        int written = snprintf(json_buff + pos, 6144 - pos, "%.2f,%.2f\\n", batch_ch1[i], batch_ch2[i]);
+        if (written > 0) pos += written;
+        if (pos >= 6100) break; // Límite de seguridad
     }
     
-    snprintf(json_buff + pos, 1200 - pos, "\"}");
+    snprintf(json_buff + pos, 6144 - pos, "\"}");
     
-    esp_mqtt_client_publish(mqtt_client, "solar/debug/data", json_buff, 0, 0, 0);
+    // Enviamos a un tópico específico para lotes
+    esp_mqtt_client_publish(mqtt_client, "solar/data/batch", json_buff, 0, 1, 0);
     free(json_buff);
+    
+    // Opcionalmente podemos resetear el contador tras envío
+    // batch_count = 0; 
+    // last_batch_p1 = -100.0f;
 }
 
 // ─── ESTRATEGIA DE PERSISTENCIA NVS (PROTECCIÓN DE FLASH) ────────────────────
@@ -1678,6 +1690,15 @@ static void Procesar_Comando_MQTT(const char *datos, int len) {
       servo_manual_anterior = true;
       ESP_LOGI(TAG, "MQTT: Servo EL manual = %.2f (Pivote forzado)", valor);
     }
+  }
+  // 6. COMANDOS BATCH (POTENCIA)
+  else if (strncmp(cmd_ptr, "get_batch", 9) == 0) {
+    Publicar_Batch_Potencia_MQTT();
+  }
+  else if (strncmp(cmd_ptr, "clear_batch", 11) == 0) {
+    batch_count = 0;
+    last_batch_p1 = -100.0f;
+    ESP_LOGI(TAG, "MQTT: Batch de potencia reiniciado.");
   }
 }
 

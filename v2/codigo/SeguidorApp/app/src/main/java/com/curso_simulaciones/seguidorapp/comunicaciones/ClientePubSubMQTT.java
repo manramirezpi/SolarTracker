@@ -22,6 +22,7 @@ public class ClientePubSubMQTT implements MqttCallback, IMqttActionListener {
     private MqttAndroidClient client;
     private String topicSubFast;
     private String topicSubSlow;
+    private String topicSubBatch;
     private String topicPub;
     
     private java.util.concurrent.ConcurrentLinkedQueue<String> colaMensajes = new java.util.concurrent.ConcurrentLinkedQueue<>();
@@ -32,6 +33,7 @@ public class ClientePubSubMQTT implements MqttCallback, IMqttActionListener {
         this.actividad = actividad;
         this.topicSubFast = AlmacenDatosRAM.topicSubFast;
         this.topicSubSlow = AlmacenDatosRAM.topicSubSlow;
+        this.topicSubBatch = AlmacenDatosRAM.topicSubBatch;
         this.topicPub = AlmacenDatosRAM.topicPub;
     }
 
@@ -62,8 +64,8 @@ public class ClientePubSubMQTT implements MqttCallback, IMqttActionListener {
             Log.d(TAG, "Conexión exitosa. Suscribiendo a canales de telemetría...");
             client.subscribe(topicSubFast, 0);
             client.subscribe(topicSubSlow, 0);
-            client.subscribe("solar/debug/data", 0);
-            AlmacenDatosRAM.conectado_PubSub = "Monitoreo activado (FAST/SLOW/DEBUG)";
+            client.subscribe(topicSubBatch, 0);
+            AlmacenDatosRAM.conectado_PubSub = "Monitoreo activado (FAST/SLOW/BATCH)";
             AlmacenDatosRAM.conectado = true;
         } catch (Exception e) {
             Log.e(TAG, "Error al suscribir", e);
@@ -92,7 +94,7 @@ public class ClientePubSubMQTT implements MqttCallback, IMqttActionListener {
         String payload = new String(mqttMessage.getPayload());
         Log.d(TAG, "Mensaje de " + topic + ": " + payload);
         // Aceptamos cualquier dato de nuestros tópicos de suscripción
-        if (topic.equals(topicSubFast) || topic.equals(topicSubSlow) || topic.equals("solar/debug/data")) {
+        if (topic.equals(topicSubFast) || topic.equals(topicSubSlow) || topic.equals(topicSubBatch)) {
             colaMensajes.add(payload);
             // Evitar saturación de memoria si la UI se suspende
             if (colaMensajes.size() > 50) {

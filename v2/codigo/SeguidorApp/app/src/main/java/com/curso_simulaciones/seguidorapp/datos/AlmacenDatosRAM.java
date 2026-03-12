@@ -14,6 +14,8 @@ public class AlmacenDatosRAM {
     public static String PASSWORD = "iotfisica";
     public static String topicSubFast = "solar/status/fast";
     public static String topicSubSlow = "solar/status/slow";
+    public static String topicSubBatch = "solar/data/batch";
+    public static String topicDebug = "solar/debug/data";
     public static String topicPub = "solar/sub";
 
     public static volatile String conectado_PubSub = "Hacer clic en CONECTAR...";
