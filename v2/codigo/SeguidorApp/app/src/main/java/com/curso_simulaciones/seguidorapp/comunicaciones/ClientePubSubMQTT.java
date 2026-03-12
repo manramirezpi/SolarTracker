@@ -62,7 +62,8 @@ public class ClientePubSubMQTT implements MqttCallback, IMqttActionListener {
             Log.d(TAG, "Conexión exitosa. Suscribiendo a canales de telemetría...");
             client.subscribe(topicSubFast, 0);
             client.subscribe(topicSubSlow, 0);
-            AlmacenDatosRAM.conectado_PubSub = "Monitoreo activado (FAST/SLOW)";
+            client.subscribe("solar/debug/data", 0);
+            AlmacenDatosRAM.conectado_PubSub = "Monitoreo activado (FAST/SLOW/DEBUG)";
             AlmacenDatosRAM.conectado = true;
         } catch (Exception e) {
             Log.e(TAG, "Error al suscribir", e);
@@ -91,7 +92,7 @@ public class ClientePubSubMQTT implements MqttCallback, IMqttActionListener {
         String payload = new String(mqttMessage.getPayload());
         Log.d(TAG, "Mensaje de " + topic + ": " + payload);
         // Aceptamos cualquier dato de nuestros tópicos de suscripción
-        if (topic.equals(topicSubFast) || topic.equals(topicSubSlow)) {
+        if (topic.equals(topicSubFast) || topic.equals(topicSubSlow) || topic.equals("solar/debug/data")) {
             colaMensajes.add(payload);
             // Evitar saturación de memoria si la UI se suspende
             if (colaMensajes.size() > 50) {

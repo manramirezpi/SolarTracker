@@ -254,6 +254,14 @@ static float ina_ch2_v = 0.0f;
 static float ina_ch2_i = 0.0f;
 static float ina_ch2_p = 0.0f;
 
+// ─── CAPTURA TEMPORAL PARA CALIBRACIÓN (25 LECTURAS) ─────────────────────────
+#define CALIB_SIZE 25
+static float calib_ch1[CALIB_SIZE];
+static float calib_ch2[CALIB_SIZE];
+static float last_calib_p1 = -1000.0f; // Forzar captura de la primera muestra
+static volatile int calib_count = 0;
+static volatile bool calib_enviado = false;
+
 // ─── FILTRO DIGITAL DE DOBLE ETAPA (INA3221) ─────────────────────────────────
 // Estructura para el procesamiento y estabilización de telemetría de potencia.
 // Actúa como un filtro pasa-bajos para mitigar transitorios eléctricos y ruido:
@@ -315,6 +323,7 @@ static void mqtt_init(void);
 static void tarea_gps(void *arg);
 static void tarea_principal(void *arg);
 static void timer_movimiento_callback(void *arg);
+static void Publicar_Debug_Calib_MQTT(void);
 
 // ─── Prototipos INA3221 ──────────────────────────────────────────────────────
 static esp_err_t ina3221_write_reg(uint8_t reg, uint16_t value);
@@ -584,6 +593,13 @@ static void tarea_principal(void *arg) {
         ultimo_pub_lento = ahora_us;
         ticks_sin_gps = 0; // Heartbeat
       }
+
+      // Despacho de captura de calibración (Una sola vez cuando esté listo)
+      if (calib_count >= CALIB_SIZE && !calib_enviado) {
+        Publicar_Debug_Calib_MQTT();
+        calib_enviado = true;
+        ESP_LOGI(TAG, "Debug: Reporte de 25 lecturas enviado exitosamente.");
+      }
     } else {
       // Si no hay MQTT, el heartbeat se mide en ciclos de 100ms (50 = 5s)
       if (ticks_sin_gps >= 50) {
@@ -720,6 +736,21 @@ static void tarea_medicion_ina(void *arg) {
     // Pipeline de filtrado digital: Media móvil y promedios diarios
     ina_actualizar_promedio(&prom_ch1, v1, i1, ch1_ok);
     ina_actualizar_promedio(&prom_ch2, v2, i2, ch2_ok);
+
+    // Captura por barrido (40mW delta) para calibración (25 muestras)
+    if (ch1_ok && ch2_ok && calib_count < CALIB_SIZE) {
+        float p1_ahora = v1 * i1 * 1000.0f;
+        float p2_ahora = v2 * i2 * 1000.0f;
+        
+        // Filtro representativo: Diferencia absoluta > 40 mW respecto al último punto
+        if (fabsf(p1_ahora - last_calib_p1) >= 40.0f) {
+            calib_ch1[calib_count] = p1_ahora;
+            calib_ch2[calib_count] = p2_ahora;
+            last_calib_p1 = p1_ahora;
+            calib_count++;
+            ESP_LOGD(TAG, "Calib: Guardado punto %d (P1=%.1f mW, P2=%.1f mW)", calib_count, p1_ahora, p2_ahora);
+        }
+    }
   }
 }
 
@@ -1391,6 +1422,26 @@ static void Publicar_Estado_Lento_MQTT(void) {
            sys_ctrl.factor_velocidad, en_modo_parking ? "true" : "false");
 
   esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC_PUB_SLOW, json, 0, 0, 0);
+}
+
+// ─── FUNCIÓN DEBUG: ENVÍO DE "ARCHIVO" DE CALIBRACIÓN ────────────────────────
+static void Publicar_Debug_Calib_MQTT(void) {
+    if (!mqtt_client) return;
+    
+    // Alarma dinámica: 25 pares + cabeceras (aprox 800 bytes)
+    char *json_buff = malloc(1200);
+    if (!json_buff) return;
+
+    int pos = snprintf(json_buff, 1200, "{\"file\":\"calib_25_lecturas.txt\",\"content\":\"P1(mW),P2(mW)\\n");
+    
+    for (int i = 0; i < CALIB_SIZE; i++) {
+        pos += snprintf(json_buff + pos, 1200 - pos, "%.4f,%.4f\\n", calib_ch1[i], calib_ch2[i]);
+    }
+    
+    snprintf(json_buff + pos, 1200 - pos, "\"}");
+    
+    esp_mqtt_client_publish(mqtt_client, "solar/debug/data", json_buff, 0, 0, 0);
+    free(json_buff);
 }
 
 // ─── ESTRATEGIA DE PERSISTENCIA NVS (PROTECCIÓN DE FLASH) ────────────────────

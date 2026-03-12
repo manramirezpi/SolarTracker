@@ -20,6 +20,13 @@ public class ProcesadorTelemetria {
 
     public boolean procesarDato(String data) {
         try {
+            // DETECCIÓN DE REPORTE DE CALIBRACIÓN (.txt simulado)
+            if (data.contains("\"file\":")) {
+                android.util.Log.i("CALIBRACION", "Recibido reporte de lecturas RAW:");
+                android.util.Log.i("CALIBRACION", data);
+                return false; 
+            }
+
             // ESTRATEGIA DE OPTIMIZACIÓN (Garbage Collector Bypass)
             if (data.contains("\"sol\":")) {
                 int idxSol = data.indexOf("\"sol\":");
