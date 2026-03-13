@@ -259,7 +259,7 @@ static float ina_ch2_i = 0.0f;
 static float ina_ch2_p = 0.0f;
 
 // ─── CAPTURA Y STREAMING DE CALIBRACIÓN (BATCH SEGMENTADO) ────────────────────
-#define BATCH_GOAL 15           // Total de muestras a capturar antes de enviar
+#define BATCH_GOAL 25           // Total de muestras a capturar antes de enviar
 #define BATCH_MAX 256            // Tamaño máximo del buffer físico
 #define CHUNK_SIZE 3            // Cantidad de datos por ráfaga MQTT
 static float batch_ch1[BATCH_MAX];
@@ -273,6 +273,7 @@ static bool streaming_activo = false;
 static int streaming_indice = 0;
 static int streaming_parte = 0;
 static int64_t ultimo_streaming_us = 0;
+static bool streaming_manual_trigger = false;  // Disparador para envío parcial inmediato
 
 // ─── FILTRO DIGITAL DE DOBLE ETAPA (INA3221) ─────────────────────────────────
 // Estructura para el procesamiento y estabilización de telemetría de potencia.
@@ -606,20 +607,17 @@ static void tarea_principal(void *arg) {
         ticks_sin_gps = 0; // Heartbeat
       }
 
-      // 4. MOTOR DE STREAMING (ENVÍO SEGMENTADO DE LOTES)
-      // Si el lote llegó a la meta, activamos el modo de envío por ráfagas
-      if (batch_count >= BATCH_GOAL && !streaming_activo) {
-        streaming_activo = true;
-        streaming_indice = 0;
-        streaming_parte = 0;
-        ultimo_streaming_us = ahora_us;
-        ESP_LOGI(TAG, "Lote de %d completo. Iniciando streaming...", BATCH_GOAL);
-      }
+      // 4. MOTOR DE STREAMING (ENVÍO GRADUAL / SEGMENTADO)
+      if (mqtt_conectado && (ahora_us - ultimo_streaming_us >= 500000LL)) {
+          bool hay_datos = (batch_count - streaming_indice >= CHUNK_SIZE);
+          bool meta_voluntaria = streaming_manual_trigger;
+          bool meta_automatica = (batch_count >= BATCH_GOAL);
 
-      // Procesa el envío de una ráfaga cada 500ms para no ahogar el WiFi
-      if (streaming_activo && (ahora_us - ultimo_streaming_us >= 500000LL)) {
-        Publicar_Batch_Potencia_MQTT(); // Envía el siguiente fragmento
-        ultimo_streaming_us = ahora_us;
+          // Si hay suficientes datos para una ráfaga, o se alcanzó la meta (automática o manual)
+          if (hay_datos || meta_voluntaria || meta_automatica) {
+              Publicar_Batch_Potencia_MQTT(); // Envía el siguiente fragmento
+              ultimo_streaming_us = ahora_us;
+          }
       }
     } else {
       // Si no hay MQTT, el heartbeat se mide en ciclos de 100ms (50 = 5s)
@@ -758,8 +756,8 @@ static void tarea_medicion_ina(void *arg) {
     ina_actualizar_promedio(&prom_ch1, v1, i1, ch1_ok);
     ina_actualizar_promedio(&prom_ch2, v2, i2, ch2_ok);
 
-    // Captura por barrido (40mW delta) para calibración (SOLO SI NO ESTÁ ENVIANDO)
-    if (ch1_ok && ch2_ok && !streaming_activo && batch_count < BATCH_MAX) {
+    // Captura por barrido (40mW delta) para calibración (Captura continua)
+    if (ch1_ok && ch2_ok && batch_count < BATCH_MAX) {
         float p1_ahora = v1 * i1 * 1000.0f;
         float p2_ahora = v2 * i2 * 1000.0f;
         
@@ -1444,22 +1442,36 @@ static void Publicar_Estado_Lento_MQTT(void) {
   esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC_PUB_SLOW, json, 0, 0, 0);
 }
 
-// ─── FUNCIÓN BATCH: ENVÍO DE DATOS FRAGMENTADO (STREAMING) ──────────────────
+// ─── FUNCIÓN BATCH: ENVÍO DE DATOS FRAGMENTADO (STREAMING GRADUAL) ──────────
 static void Publicar_Batch_Potencia_MQTT(void) {
-    if (!mqtt_client || !streaming_activo) return;
+    if (!mqtt_client) return;
 
-    size_t buf_size = 1024; // Buffer pequeño y seguro (1KB) para fragmentos
+    // ¿Cuántos datos pendientes hay realmente?
+    int pendiente = batch_count - streaming_indice;
+    if (pendiente <= 0 && !streaming_manual_trigger) return;
+
+    size_t buf_size = 1024;
     char *json_buff = malloc(buf_size);
     if (!json_buff) return;
 
-    // Calcular cuántos enviar en este fragmento
-    int restante = batch_count - streaming_indice;
-    int a_enviar = (restante > CHUNK_SIZE) ? CHUNK_SIZE : restante;
-    bool es_ultimo = (streaming_indice + a_enviar >= batch_count);
+    // Calculamos el tamaño de la ráfaga actual
+    int a_enviar = (pendiente > CHUNK_SIZE) ? CHUNK_SIZE : pendiente;
+    if (a_enviar < 0) a_enviar = 0;
+
+    // Verificamos si es el ÚLTIMO fragmento de esta secuencia
+    bool es_ultimo_de_la_cola = (streaming_indice + a_enviar >= batch_count);
+    bool goal_reached = (batch_count >= BATCH_GOAL);
+    bool force_end = (streaming_manual_trigger && es_ultimo_de_la_cola);
+    
+    // El mensaje se marca como 'last' si llegamos a la meta o si fue forzado manualmente
+    bool msg_last = (goal_reached || force_end);
+    bool msg_temp = streaming_manual_trigger;
 
     int pos = snprintf(json_buff, buf_size, 
-              "{\"id\":%d,\"part\":%d,\"last\":%s,\"data\":\"", 
-              batch_id, streaming_parte, es_ultimo ? "true" : "false");
+              "{\"id\":%d,\"part\":%d,\"last\":%s,\"temp\":%s,\"data\":\"", 
+              batch_id, streaming_parte, 
+              msg_last ? "true" : "false",
+              msg_temp ? "true" : "false");
 
     for (int i = 0; i < a_enviar; i++) {
         int idx = streaming_indice + i;
@@ -1472,16 +1484,21 @@ static void Publicar_Batch_Potencia_MQTT(void) {
     esp_mqtt_client_publish(mqtt_client, "solar/data/batch", json_buff, 0, 0, 0);
     free(json_buff);
 
-    // Actualizar punteros de streaming
-    streaming_indice += a_enviar;
-    streaming_parte++;
-
-    if (es_ultimo) {
-        ESP_LOGI(TAG, "Streaming de lote %d finalizado (%d partes).", batch_id, streaming_parte);
+    // Actualización de estado
+    if (msg_last) {
+        ESP_LOGI(TAG, "Lote %d finalizado (Manual: %s, Muestras: %d).", 
+                 batch_id, force_end ? "SI" : "NO", batch_count);
+        batch_count = 0;
+        streaming_indice = 0;
+        streaming_parte = 0;
+        batch_id++;
+        streaming_manual_trigger = false;
         streaming_activo = false;
-        batch_count = 0;    // Resetear para capturar el siguiente lote cíclico
-        batch_id++;         // Incrementar ID para el ciclo que viene
         last_batch_p1 = -100.0f;
+    } else {
+        streaming_indice += a_enviar;
+        streaming_parte++;
+        streaming_activo = true; // Indica que hay una ráfaga en curso
     }
 }
 
@@ -1722,7 +1739,11 @@ static void Procesar_Comando_MQTT(const char *datos, int len) {
   }
   // 6. COMANDOS BATCH (POTENCIA)
   else if (strncmp(cmd_ptr, "get_batch", 9) == 0) {
-    Publicar_Batch_Potencia_MQTT();
+    // Legacy: No hace nada o dispara el motor gradual
+  }
+  else if (strncmp(cmd_ptr, "get_temp", 8) == 0) {
+    streaming_manual_trigger = true;
+    ESP_LOGI(TAG, "MQTT: Captura temporal (Snapshot) solicitada.");
   }
   else if (strncmp(cmd_ptr, "clear_batch", 11) == 0) {
     batch_count = 0;

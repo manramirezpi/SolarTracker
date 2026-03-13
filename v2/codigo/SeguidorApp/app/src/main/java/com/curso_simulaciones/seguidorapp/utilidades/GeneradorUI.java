@@ -24,7 +24,7 @@ public class GeneradorUI {
 
     private Activity actividad;
 
-    public Button botonConectar, botonResetGPS;
+    public Button botonConectar, botonResetGPS, botonTemp;
     public TextView textviewAviso, textviewFechaHora;
 
     public GaugeSimple gaugeSolAz, gaugeSolEl;
@@ -101,6 +101,12 @@ public class GeneradorUI {
         botonResetGPS.setText("VOLVER A GPS");
         botonResetGPS.setTextColor(Color.WHITE);
         botonResetGPS.getBackground().setColorFilter(Color.rgb(200, 50, 50), PorterDuff.Mode.MULTIPLY);
+
+        botonTemp = new Button(actividad);
+        botonTemp.setText("SNAPSHOT");
+        botonTemp.setTextColor(Color.WHITE);
+        botonTemp.setTextSize(10);
+        botonTemp.getBackground().setColorFilter(Color.rgb(100, 100, 100), PorterDuff.Mode.MULTIPLY);
 
         textviewAviso = new TextView(actividad);
         textviewAviso.setGravity(Gravity.CENTER);
@@ -349,6 +355,7 @@ public class GeneradorUI {
         statusCol.addView(textviewAviso);
         
         footer.addView(statusCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+        footer.addView(botonTemp, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.45f));
         footer.addView(botonConectar, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.45f));
         
         main.addView(footer, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f));

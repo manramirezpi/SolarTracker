@@ -171,6 +171,13 @@ public class ActividadSeguidor extends Activity implements Runnable {
                 publicarComando("set_ser_el", seekBar.getProgress(), true);
             }
         });
+
+        ui.botonTemp.setOnClickListener(v -> {
+            if (AlmacenDatosRAM.conectado) {
+                publicarComando("get_temp", 0, false);
+                AlmacenDatosRAM.conectado_PubSub = "Solicitando Snapshot...";
+            }
+        });
     }
 
     private void sincronizarControles() {

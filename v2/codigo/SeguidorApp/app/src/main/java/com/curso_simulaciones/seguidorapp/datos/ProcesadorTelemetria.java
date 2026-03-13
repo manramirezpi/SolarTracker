@@ -27,7 +27,7 @@ public class ProcesadorTelemetria {
     public boolean procesarDato(String data, Context context) {
         try {
             // DETECCIÓN DE LOTE DE DATOS (Calibración)
-            if (data.contains("\"batch\":")) {
+            if (data.contains("\"part\":")) {
                 guardarBatchTxt(data, context);
                 return false; 
             }
@@ -161,19 +161,20 @@ public class ProcesadorTelemetria {
             int batchId = obj.optInt("id", 0);
             int part = obj.optInt("part", 0);
             boolean isLast = obj.optBoolean("last", false);
+            boolean isTemp = obj.optBoolean("temp", false);
             String content = obj.optString("data", "");
             
-            // Usamos un nombre de archivo basado en el ID del lote
-            // Esto garantiza que todas las partes (part 0, 1, 2...) se escriban en el mismo archivo
+            // Usamos un archivo de RECEPCIÓN temporal para evitar que el usuario lo abra a medias
             File folder = context.getExternalFilesDir(null);
-            File file = new File(folder, "LOTE_ID_" + batchId + ".txt");
+            File file = new File(folder, "RECEP_LOTE_" + batchId + ".txt");
             
             // Abrimos en modo APPEND (true)
             FileOutputStream out = new FileOutputStream(file, true);
             
-            // Si es la primera parte, podemos poner una cabecera opcional
+            // Si es la primera parte, ponemos la cabecera
             if (part == 0) {
                 String header = "# LOTE ID: " + batchId + " | Iniciado: " + new Date().toString() + "\n";
+                if (isTemp) header += "# --- CAPTURA TEMPORAL (SNAPSHOT) ---\n";
                 header += "P1(mW),P2(mW)\n";
                 out.write(header.getBytes());
             }
@@ -182,15 +183,27 @@ public class ProcesadorTelemetria {
             out.close();
             
             if (isLast) {
-                AlmacenDatosRAM.conectado_PubSub = "¡LOTE " + batchId + " COMPLETO!";
-                android.util.Log.i("TELEMETRIA", "Lote finalizado en: " + file.getAbsolutePath());
+                // Generamos un nombre final basado en si es parcial (temp) o completo (full)
+                // Incluimos un timestamp para evitar sobreescribir capturas previas del mismo ID
+                String timestamp = new SimpleDateFormat("HHmmss", Locale.getDefault()).format(new Date());
+                String prefix = isTemp ? "SNAPSHOT_" : "COMPLETO_";
+                String finalName = prefix + "LOTE_" + batchId + "_" + timestamp + ".txt";
+                
+                File finalFile = new File(folder, finalName);
+                if (file.renameTo(finalFile)) {
+                    AlmacenDatosRAM.conectado_PubSub = (isTemp ? "¡SNAPSHOT " : "¡LOTE ") + batchId + " GUARDADO!";
+                    android.util.Log.i("TELEMETRIA", "Archivo listo: " + finalFile.getName());
+                } else {
+                    AlmacenDatosRAM.conectado_PubSub = "Error al renombrar archivo final";
+                }
             } else {
-                AlmacenDatosRAM.conectado_PubSub = "Recibiendo lote " + batchId + " (Parte " + part + ")...";
+                String msg = (isTemp ? "Recibiendo Snapshot " : "Recibiendo Lote ") + batchId + " (P." + part + ")...";
+                AlmacenDatosRAM.conectado_PubSub = msg;
             }
             
         } catch (Exception e) {
             e.printStackTrace();
-            AlmacenDatosRAM.conectado_PubSub = "Error al procesar fragmento de lote";
+            AlmacenDatosRAM.conectado_PubSub = "Error al procesar telemetría de lote";
         }
     }
 }
