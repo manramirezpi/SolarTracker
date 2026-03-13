@@ -28,41 +28,69 @@ de 2 ejes con monitoreo energético e integración IoT.
 | I2C SCL | 22 | Bus reloj — INA3221 |
 
 ---
+## Algoritmo de posición solar
 
-### Algoritmo de posición solar
+Basado en los algoritmos de Jean Meeus (*Astronomical Algorithms*, 1998),
+versión simplificada con los términos de corrección principales.
+La implementación sigue ocho pasos:
 
-Basado en los algoritmos de Jean Meeus (*Astronomical Algorithms*, 1998). 
-La implementación incluye los siguientes componentes:
+1. **Tiempo decimal**: conversión de HH:MM:SS UTC a fracción continua
+   del día para cálculo continuo sin discontinuidades horarias
 
-- Día Juliano relativo al epoch J2000.0 para simplificar perturbaciones 
-  orbitales a largo plazo
-- Longitud media y anomalía media para posición teórica en la elipse orbital
-- Coordenadas eclípticas con corrección de excentricidad y oblicuidad dinámica 
-  de la eclíptica (`ε = 23.439° - 0.0000004·n`)
-- Tiempo sidéreo local (LMST) calculado a partir de la longitud geográfica GPS
-- Proyección mediante trigonometría esférica de coordenadas ecuatoriales 
-  (ascensión recta y declinación) al plano horizontal local
+2. **Día Juliano (J2000.0)**: contador universal de días referenciado
+   al mediodía del 1 de enero de 2000, que simplifica las perturbaciones
+   orbitales a largo plazo (`n = JD - 2451545.0`)
 
-**Precisión estimada:** ±0.2° a ±0.4°, suficiente para la resolución mecánica 
-del sistema (±1-2° con servos analógicos). Las correcciones omitidas 
-(nutación, aberración, paralaje) aportarían una mejora de ±0.05° adicional, 
-irrelevante para esta aplicación.
+3. **Parámetros orbitales**: longitud media `L` y anomalía media `g`
+   con corrección de módulo para mantener el rango [0°, 360°]
+
+4. **Coordenadas eclípticas**: longitud eclíptica con dos términos de
+   corrección por excentricidad orbital:
+   `λ = L + 1.915·sin(g) + 0.020·sin(2g)`
+   Oblicuidad dinámica de la eclíptica:
+   `ε = 23.439° - 0.0000004·n`
+
+5. **Coordenadas ecuatoriales**: declinación y ascensión recta mediante
+   proyección trigonométrica desde el plano eclíptico
+
+6. **Tiempo sidéreo (GMST/LMST)**: Greenwich Mean Sidereal Time por
+   fórmula de un término, corregido por longitud geográfica GPS para
+   obtener el tiempo sidéreo local
+
+7. **Ángulo horario**: desplazamiento del sol respecto al meridiano
+   local, normalizado al rango [-180°, +180°]
+
+8. **Coordenadas horizontales**: elevación y azimut por trigonometría
+   esférica. Convención de azimut: N=0°, E=90°, S=180°, O=270°
+
+**Precisión estimada:** ±0.2° a ±0.4°. Las correcciones omitidas
+(nutación, aberración, paralaje, términos superiores de GMST) aportarían
+±0.05° adicional, irrelevante dado que la resolución mecánica del sistema
+con servos analógicos es ±1° a ±2°. La limitante de precisión del
+seguimiento es mecánica, no algorítmica.
 
 ---
 
 ## Arquitectura de tareas FreeRTOS
 ```
-Tarea               Prioridad   Stack    Periodo    Función
+Tarea               Prioridad   Stack (B)    Periodo    Función
 ─────────────────────────────────────────────────────────────────
-tarea_gps           4 (alta)    4096B    continuo   parseo NMEA y cálculo solar
-tarea_ina           3           2048B    100ms      lectura INA3221 a 10 Hz
-tarea_mqtt_fast     3           3072B    250ms      publica ángulos y potencia
-tarea_mqtt_slow     2           3072B    1000ms     publica GPS y diagnóstico
-tarea_servos        3           2048B    20ms       actualización PWM con rampa
-tarea_principal     1 (baja)    4096B    continuo   watchdog y gestión WiFi
+tarea_gps           4 (alta)    4096        continuo   parseo NMEA y cálculo solar
+tarea_ina           3           2048        100ms      lectura INA3221 a 10 Hz
+tarea_mqtt_fast     3           3072        250ms      publica ángulos y potencia
+tarea_mqtt_slow     2           3072        1000ms     publica GPS y diagnóstico
+tarea_servos        3           2048        20ms       actualización PWM con rampa
+tarea_principal     1 (baja)    4096        continuo   watchdog y gestión WiFi
 ```
+## Sincronización de tareas
 
-Sincronización: [especificar — mutex, semáforos, colas entre tareas]
+| Mecanismo | Uso | Justificación |
+|---|---|---|
+| Cola `cola_gps` (longitud 2) | Comunicación GPS → tarea_principal mediante índice de buffer ping-pong | Evita copiar cadenas NMEA completas entre tareas — solo se transfiere el índice del buffer recién llenado |
+| Event Group `wifi_event_group` | Sincronización de estado WiFi con bits `WIFI_CONNECTED_BIT` y `WIFI_FAIL_BIT` | Permite bloqueo sin consumo de CPU durante la inicialización de red |
+| Variables `volatile` | `pos_obj_az` y `pos_obj_el` compartidas entre tarea_principal y callback de timer | El callback opera como ISR — `volatile` fuerza lectura desde RAM y previene valores cacheados por el compilador |
+| Task pinning (Core 1) | Todas las tareas de control ancladas con `xTaskCreatePinnedToCore` | El Core 0 gestiona el stack WiFi/BT de ESP-IDF — el anclaje al Core 1 aísla el cálculo astronómico y el control de servos de picos de tráfico de red |
+| TWDT | Cada tarea reporta actividad mediante `esp_task_wdt_reset()` | Detecta bloqueos individuales por tarea sin necesidad de reiniciar el sistema completo |
 
 ---
 
@@ -123,16 +151,19 @@ obtenida experimentalmente:
 2. Se registran múltiples pares (P_estático, P_seguidor) distribuidos 
    a lo largo de ese rango
 3. Se ajusta un polinomio de segundo orden por mínimos cuadrados sobre 
-   esos pares
+   esos pares:
+```
+P_seguidor_esperado = a·P_estático² + b·P_estático + c
+```
 
 Un día de irradiancia estable produciría datos concentrados en un rango 
-estrecho, resultando en un modelo no apto para condiciones 
-variables. La variabilidad atmosférica durante la caracterización es 
-por tanto una condición deseable, no un inconveniente.
-```
+estrecho, resultando en un modelo no apto para condiciones variables. 
+La variabilidad atmosférica durante la caracterización es por tanto 
+una condición deseable, no un inconveniente.
+
 Esta expresión representa la potencia que debería generar el panel 
 seguidor si estuviera en las mismas condiciones que el estático. 
-La ganancia real del seguimiento se calcula entonces como:
+La ganancia real del seguimiento se calcula como:
 ```
 ganancia = (P_seguidor_real - P_seguidor_esperado) / P_seguidor_esperado × 100%
 ```
@@ -140,9 +171,11 @@ ganancia = (P_seguidor_real - P_seguidor_esperado) / P_seguidor_esperado × 100%
 Si `ganancia > 0`, el seguidor está captando más energía de la que 
 captaría un panel fijo bajo las mismas condiciones atmosféricas.
 
-**Estado actual:** caracterización pendiente de medición en día despejado 
-con irradiancia estable. Los coeficientes `a`, `b` y `c` están definidos 
-como constantes configurables en el firmware.
+**Estado actual:** caracterización pendiente. Los coeficientes `a`, `b` 
+y `c` se obtendrán en un día con nubosidad parcial que cubra un rango 
+amplio de irradiancia. Mientras tanto, el firmware usa el factor lineal 
+420/520 = 0.808 como aproximación inicial.
+
 ---
 
 ## Compilación
@@ -154,5 +187,3 @@ idf.py set-target esp32   # solo primera vez
 idf.py build
 idf.py -p /dev/ttyUSB0 flash monitor
 ```
-
-
