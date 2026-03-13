@@ -255,7 +255,7 @@ static float ina_ch2_i = 0.0f;
 static float ina_ch2_p = 0.0f;
 
 // ─── CAPTURA TEMPORAL PARA CALIBRACIÓN (BATCH 25) ────────────────────────────
-#define BATCH_SIZE 25
+#define BATCH_SIZE 150
 static float batch_ch1[BATCH_SIZE];
 static float batch_ch2[BATCH_SIZE];
 static int batch_count = 0;
