@@ -1,35 +1,85 @@
-# SolarTracker Pro - Android App (v2.0)
+# SeguidorApp — Android v2.0
 
-Esta es la aplicación móvil diseñada para el monitoreo y control remoto del sistema SolarTracker v2.0. La App actúa como un centro de control científico, permitiendo visualizar en tiempo real el rendimiento energético y la posición del sistema.
-
-## Características de la Interfaz
-- **Visualización en Tiempo Real:** Dashboard con medidores (Gauges) para voltaje, corriente y potencia instantánea (actualización a 5 Hz).
-- **Mando Inalámbrico:** Sliders de control manual para mover el seguidor directamente (Azimut y Elevación).
-- **Modo Simulación:** Interfaz para ajustar la velocidad de simulación y realizar pruebas de trayectorias.
-- **Gráficas de Rendimiento:** Visualización de la energía acumulada (mWh) y comparación entre paneles.
-
-## Arquitectura de Software
-La aplicación está construida sobre el patrón **MVC (Modelo-Vista-Controlador)** con un fuerte enfoque en el rendimiento:
-
-- **Procesamiento de Telemetría (ProcesadorTelemetria):** Optimizado para evitar el Garbage Collector de Java. Lee los datos MQTT como texto puro para evitar el costo computacional de parsear JSON a alta frecuencia (5 Hz).
-- **Comunicaciones (ClientePubSubMQTT):** Cliente MQTT asíncrono con gestión de colas concurrentes para no bloquear el hilo principal de la interfaz (UI Thread).
-- **UI Reactiva:** Implementa pausas de bloqueo inteligente (3s) tras la intervención manual del usuario, evitando saltos visuales mientras se ajustan los parámetros.
-- **Buffer Circular:** Utilizado para el cálculo de promedios móviles, garantizando que las agujas de los medidores se muevan con suavidad.
-
-## Integración MQTT
-La App se suscribe a dos canales de datos:
-1.  `solar/status/fast`: Datos críticos (Ángulos y Potencia) para visualización fluida.
-2.  `solar/status/slow`: Datos administrativos y de geolocalización.
-
-Y publica comandos en:
-- `solar/sub`: Envío de coordenadas manuales, fechas estáticas y comandos de modo.
-
-## Requisitos de Desarrollo
-- **IDE:** Android Studio (Koala o superior).
-- **SDK Mínimo:** Android 7.0 (API 24).
-- **Librerías Clave:**
-    - Paho MQTT Client (para comunicaciones).
-    - [Insertar librerías de gráficas si aplica, ej: MPAndroidChart].
+Aplicación móvil para monitoreo en tiempo real y control remoto del sistema 
+SolarTracker v2.0. Se comunica con el firmware del ESP32 mediante MQTT.
 
 ---
-**Nota de Diseño:** Los componentes visuales están aislados en la clase `GeneradorUI`, lo que facilita el rediseño estético sin afectar la lógica de comunicaciones o procesamiento de datos.
+
+## Funcionalidades
+
+| Función | Descripción |
+|---|---|
+| Dashboard energético | Medidores de voltaje, corriente y potencia instantánea a 5 Hz |
+| Control manual | Sliders de azimut y elevación para posicionamiento directo |
+| Modo simulación | Ajuste de velocidad y prueba de trayectorias solares |
+| Comparación de paneles | Gráfica de energía acumulada (mWh) seguidor vs. estático |
+| Geolocalización | Visualización de coordenadas GPS y tiempo UTC activo |
+
+---
+
+## Arquitectura
+
+La app sigue el patrón MVC con separación estricta entre comunicaciones, 
+procesamiento de datos y capa de presentación.
+```
+SeguidorApp/
+├── ClientePubSubMQTT.java     ← cliente MQTT asíncrono con cola concurrente
+├── ProcesadorTelemetria.java  ← parsing de telemetría optimizado para 5 Hz
+├── GeneradorUI.java           ← componentes visuales aislados de la lógica
+└── MainActivity.java          ← coordinación general y ciclo de vida
+```
+
+### Decisiones de diseño relevantes
+
+**Parsing sin JSON**: el procesador de telemetría lee los mensajes MQTT como 
+texto plano en lugar de deserializar JSON. Esto evita la presión sobre el 
+Garbage Collector de Java a 5 Hz de actualización, reduciendo los saltos 
+visuales en los medidores.
+
+**Cola concurrente en MQTT**: el cliente publica y recibe mensajes en un hilo 
+separado para no bloquear el UI Thread. Los datos llegan a la interfaz mediante 
+un handler que garantiza actualizaciones seguras desde el hilo principal.
+
+**Bloqueo post-intervención manual**: tras un comando manual del usuario, la 
+app suspende las actualizaciones automáticas por 3 segundos para evitar que 
+la telemetría entrante sobreescriba visualmente el ajuste antes de que el 
+hardware responda.
+
+**Buffer circular para promedios móviles**: los medidores usan un buffer 
+circular para suavizar lecturas ruidosas, evitando oscilaciones bruscas en 
+la aguja sin introducir latencia perceptible.
+
+**GeneradorUI desacoplado**: todos los componentes visuales están contenidos 
+en una clase separada, lo que permite modificar la interfaz sin tocar la 
+lógica de comunicaciones ni el procesamiento de datos.
+
+---
+
+## Integración MQTT
+
+### Tópicos de suscripción
+
+| Tópico | Contenido | Frecuencia |
+|---|---|---|
+| `solar/status/fast` | Ángulos de azimut y elevación, potencia de ambos paneles | 5 Hz |
+| `solar/status/slow` | Coordenadas GPS, tiempo UTC, estado del sistema | ~0.1 Hz |
+
+### Tópicos de publicación
+
+| Tópico | Contenido |
+|---|---|
+| `solar/sub` | Coordenadas manuales, fecha estática, comandos de modo |
+
+---
+
+## Requisitos
+
+- Android Studio Koala o superior
+- SDK mínimo: Android 7.0 (API 24)
+- Dependencias: Paho MQTT Client, MPAndroidChart
+
+---
+
+## Capturas de pantalla
+
+*(Pendiente — dashboard en operación, gráfica comparativa de paneles)*
