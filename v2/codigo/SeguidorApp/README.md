@@ -62,7 +62,7 @@ lógica de comunicaciones ni el procesamiento de datos.
 | Tópico | Contenido | Frecuencia |
 |---|---|---|
 | `solar/status/fast` | Ángulos de azimut y elevación, potencia de ambos paneles | 5 Hz |
-| `solar/status/slow` | Coordenadas GPS, tiempo UTC, estado del sistema | ~0.1 Hz |
+| `solar/status/slow` | Coordenadas GPS, tiempo UTC, estado del sistema | ~1 Hz |
 
 ### Tópicos de publicación
 
