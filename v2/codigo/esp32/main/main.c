@@ -29,6 +29,7 @@
 #include "freertos/task.h"
 #include "mqtt_client.h"
 #include "nvs_flash.h"
+#include "esp_random.h"
 
 static const char *TAG = "SOLAR";
 
@@ -258,14 +259,15 @@ static float ina_ch2_v = 0.0f;
 static float ina_ch2_i = 0.0f;
 static float ina_ch2_p = 0.0f;
 
-// ─── CAPTURA Y STREAMING DE CALIBRACIÓN (BATCH SEGMENTADO) ────────────────────
-#define BATCH_GOAL 25           // Total de muestras a capturar antes de enviar
-#define BATCH_MAX 256            // Tamaño máximo del buffer físico
-#define CHUNK_SIZE 3            // Cantidad de datos por ráfaga MQTT
+// ─── CAPTURA Y STREAMING DE CALIBRACIÓN (BATCH MASIVO) ───────────────────────
+#define BATCH_GOAL 500           // Meta de muestras para el análisis masivo
+#define BATCH_MAX 1000           // Aumentamos buffer para evitar desbordes
+#define CHUNK_SIZE 3             // Envío ágil de 3 en 3
 static float batch_ch1[BATCH_MAX];
 static float batch_ch2[BATCH_MAX];
 static int batch_count = 0;
 static int batch_id = 0;
+static uint32_t session_id = 0;  // ID único para este arranque
 static float last_batch_p1 = -100.0f;
 
 // Estado de la transmisión segmentada
@@ -431,6 +433,7 @@ void app_main(void) {
   // ────────────────────────────────────────────────────────
   wifi_init();
   mqtt_init();
+  session_id = esp_random() % 10000; // Generar ID de sesión (0-9999)
 
   // 7. ARRANQUE DEL SCHEDULER (Multitasking Base)
   // ────────────────────────────────────────────────────────
@@ -1458,18 +1461,16 @@ static void Publicar_Batch_Potencia_MQTT(void) {
     int a_enviar = (pendiente > CHUNK_SIZE) ? CHUNK_SIZE : pendiente;
     if (a_enviar < 0) a_enviar = 0;
 
-    // Verificamos si es el ÚLTIMO fragmento de esta secuencia
-    bool es_ultimo_de_la_cola = (streaming_indice + a_enviar >= batch_count);
-    bool goal_reached = (batch_count >= BATCH_GOAL);
-    bool force_end = (streaming_manual_trigger && es_ultimo_de_la_cola);
+    // Verificamos si es el ÚLTIMO fragmento disponible en el buffer
+    bool es_ultimo_del_buffer = (streaming_indice + a_enviar >= batch_count);
     
-    // El mensaje se marca como 'last' si llegamos a la meta o si fue forzado manualmente
-    bool msg_last = (goal_reached || force_end);
+    // El archivo SOLO se cierra si es el último fragmento Y (se llegó a la meta O fue manual)
+    bool msg_last = es_ultimo_del_buffer && (batch_count >= BATCH_GOAL || streaming_manual_trigger);
     bool msg_temp = streaming_manual_trigger;
 
     int pos = snprintf(json_buff, buf_size, 
-              "{\"id\":%d,\"part\":%d,\"last\":%s,\"temp\":%s,\"data\":\"", 
-              batch_id, streaming_parte, 
+              "{\"sid\":%lu,\"id\":%d,\"part\":%d,\"last\":%s,\"temp\":%s,\"data\":\"", 
+              (unsigned long)session_id, batch_id, streaming_parte, 
               msg_last ? "true" : "false",
               msg_temp ? "true" : "false");
 
@@ -1487,7 +1488,7 @@ static void Publicar_Batch_Potencia_MQTT(void) {
     // Actualización de estado
     if (msg_last) {
         ESP_LOGI(TAG, "Lote %d finalizado (Manual: %s, Muestras: %d).", 
-                 batch_id, force_end ? "SI" : "NO", batch_count);
+                 batch_id, msg_temp ? "SI" : "NO", batch_count);
         batch_count = 0;
         streaming_indice = 0;
         streaming_parte = 0;

@@ -158,47 +158,42 @@ public class ProcesadorTelemetria {
     private void guardarBatchTxt(String jsonStr, Context context) {
         try {
             JSONObject obj = new JSONObject(jsonStr);
+            int sessionId = obj.optInt("sid", 0);
             int batchId = obj.optInt("id", 0);
             int part = obj.optInt("part", 0);
             boolean isLast = obj.optBoolean("last", false);
             boolean isTemp = obj.optBoolean("temp", false);
             String content = obj.optString("data", "");
             
-            // Usamos un archivo de RECEPCIÓN temporal para evitar que el usuario lo abra a medias
+            // ESTRATEGIA DE ACUMULACIÓN MASIVA:
+            // Usamos un único archivo de trabajo para que sesiones cortas o perdidas alimenten el mismo set.
             File folder = context.getExternalFilesDir(null);
-            File file = new File(folder, "RECEP_LOTE_" + batchId + ".txt");
+            File file = new File(folder, "FLUJO_POTENCIA_PENDIENTE.txt");
             
-            // Abrimos en modo APPEND (true)
-            FileOutputStream out = new FileOutputStream(file, true);
+            FileOutputStream out = new FileOutputStream(file, true); // SIEMPRE APPEN (true)
             
-            // Si es la primera parte, ponemos la cabecera
+            // Si es el inicio de una ráfaga o una nueva sesión, ponemos una marca de trazabilidad
             if (part == 0) {
-                String header = "# LOTE ID: " + batchId + " | Iniciado: " + new Date().toString() + "\n";
-                if (isTemp) header += "# --- CAPTURA TEMPORAL (SNAPSHOT) ---\n";
-                header += "P1(mW),P2(mW)\n";
-                out.write(header.getBytes());
+                String stamp = "\n# --- NUEVA SESIÓN/LOTE (SID:" + sessionId + " | ID:" + batchId + ") ---\n";
+                stamp += "# Fecha: " + new Date().toString() + "\n";
+                out.write(stamp.getBytes());
             }
 
             out.write(content.getBytes());
             out.close();
             
             if (isLast) {
-                // Generamos un nombre final basado en si es parcial (temp) o completo (full)
-                // Incluimos un timestamp para evitar sobreescribir capturas previas del mismo ID
-                String timestamp = new SimpleDateFormat("HHmmss", Locale.getDefault()).format(new Date());
-                String prefix = isTemp ? "SNAPSHOT_" : "COMPLETO_";
-                String finalName = prefix + "LOTE_" + batchId + "_" + timestamp + ".txt";
+                // Al completar la meta masiva (500), generamos el archivo final.
+                String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
+                String prefix = isTemp ? "SNAPSHOT_MASIVO_" : "DATA_MASIVA_";
+                String finalName = prefix + timestamp + ".txt";
                 
                 File finalFile = new File(folder, finalName);
                 if (file.renameTo(finalFile)) {
-                    AlmacenDatosRAM.conectado_PubSub = (isTemp ? "¡SNAPSHOT " : "¡LOTE ") + batchId + " GUARDADO!";
-                    android.util.Log.i("TELEMETRIA", "Archivo listo: " + finalFile.getName());
-                } else {
-                    AlmacenDatosRAM.conectado_PubSub = "Error al renombrar archivo final";
+                    AlmacenDatosRAM.conectado_PubSub = "¡COLECCIÓN " + finalName + " GUARDADA!";
                 }
             } else {
-                String msg = (isTemp ? "Recibiendo Snapshot " : "Recibiendo Lote ") + batchId + " (P." + part + ")...";
-                AlmacenDatosRAM.conectado_PubSub = msg;
+                AlmacenDatosRAM.conectado_PubSub = "Alimentando colección masiva (L:" + batchId + " P:" + part + ")...";
             }
             
         } catch (Exception e) {
