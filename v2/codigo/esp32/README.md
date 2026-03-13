@@ -1,6 +1,6 @@
 # SolarTracker v2.0 — Firmware ESP32
 
-Firmware desarrollado con ESP-IDF v5.5 para el seguimiento solar astronómico 
+Firmware desarrollado con ESP-IDF v5.5.3 para el seguimiento solar astronómico 
 de 2 ejes con monitoreo energético e integración IoT.
 
 ---
@@ -9,10 +9,9 @@ de 2 ejes con monitoreo energético e integración IoT.
 
 | Parámetro | Valor |
 |---|---|
-| Microcontrolador | ESP32 dual-core 240 MHz |
-| Framework | ESP-IDF v5.5 |
-| RTOS | FreeRTOS multitarea |
-| Gestión de memoria | Buffers estáticos para evitar fragmentación del heap |
+| Framework | ESP-IDF v5.5.3 |
+| Heap dinámico | Minimizado — uso intensivo de buffers estáticos |
+| Núcleo de control | Core 1 — aislado del stack WiFi/BT |
 
 ---
 
@@ -104,12 +103,24 @@ tarea_principal     1 (baja)    4096        continuo   watchdog y gestión WiFi
 ### Parseo GPS
 - Decodificación de tramas NMEA-0183 `$GPRMC` con validación por checksum XOR
 - Extracción de coordenadas, velocidad y tiempo UTC
+- Persistencia de coordenadas en NVS (Non-Volatile Storage): al arrancar, 
+  el sistema recupera las últimas coordenadas válidas desde flash e inicia 
+  el seguimiento en cuanto el GPS sincroniza el reloj UTC, sin esperar a 
+  que se establezca un fix de posición completo. Las coordenadas en NVS 
+  se actualizan solo cuando el cambio supera 0.2° para minimizar escrituras 
+  en flash
 - Continuidad de operación ante pérdida de señal usando último fix válido
 
 ### Medición energética
 - Lectura del INA3221 a 10 Hz por I2C
 - Tres canales simultáneos: panel seguidor, panel estático y reserva
-- Cálculo de energía acumulada (mWh) en el firmware
+- **Potencia promedio instantánea**: calculada mediante buffer circular como 
+  promedio móvil, representa el comportamiento energético de los últimos 
+  minutos y suaviza variaciones rápidas por nubosidad transitoria
+- **Energía diaria acumulada (mWh)**: integración continua de potencia a lo 
+  largo del día, se reinicia automáticamente al inicio de cada jornada. 
+  La comparación entre el acumulado del panel seguidor y el estático es 
+  la métrica principal para estimar la ganancia real del seguimiento
 
 ### Control de servos
 - Resolución PWM de 16 bits mediante periférico LEDC del ESP32
@@ -180,7 +191,7 @@ amplio de irradiancia. Mientras tanto, el firmware usa el factor lineal
 
 ## Compilación
 
-Requiere ESP-IDF v5.5 instalado y configurado.
+Requiere ESP-IDF v5.5.3 instalado y configurado.
 ```bash
 cd v2/codigo/esp32
 idf.py set-target esp32   # solo primera vez
