@@ -3,7 +3,7 @@
 Esta es la aplicación móvil diseñada para el monitoreo y control remoto del sistema SolarTracker v2.0. La App actúa como un centro de control científico, permitiendo visualizar en tiempo real el rendimiento energético y la posición del sistema.
 
 ## Características de la Interfaz
-- **Visualización en Tiempo Real:** Dashboard con medidores (Gauges) para voltaje, corriente y potencia instantánea (actualización a 4Hz).
+- **Visualización en Tiempo Real:** Dashboard con medidores (Gauges) para voltaje, corriente y potencia instantánea (actualización a 5 Hz).
 - **Mando Inalámbrico:** Sliders de control manual para mover el seguidor directamente (Azimut y Elevación).
 - **Modo Simulación:** Interfaz para ajustar la velocidad de simulación y realizar pruebas de trayectorias.
 - **Gráficas de Rendimiento:** Visualización de la energía acumulada (mWh) y comparación entre paneles.
@@ -11,7 +11,7 @@ Esta es la aplicación móvil diseñada para el monitoreo y control remoto del s
 ## Arquitectura de Software
 La aplicación está construida sobre el patrón **MVC (Modelo-Vista-Controlador)** con un fuerte enfoque en el rendimiento:
 
-- **Procesamiento de Telemetría (ProcesadorTelemetria):** Optimizado para evitar el Garbage Collector de Java. Lee los datos MQTT como texto puro para evitar el costo computacional de parsear JSON a alta frecuencia (5Hz).
+- **Procesamiento de Telemetría (ProcesadorTelemetria):** Optimizado para evitar el Garbage Collector de Java. Lee los datos MQTT como texto puro para evitar el costo computacional de parsear JSON a alta frecuencia (5 Hz).
 - **Comunicaciones (ClientePubSubMQTT):** Cliente MQTT asíncrono con gestión de colas concurrentes para no bloquear el hilo principal de la interfaz (UI Thread).
 - **UI Reactiva:** Implementa pausas de bloqueo inteligente (3s) tras la intervención manual del usuario, evitando saltos visuales mientras se ajustan los parámetros.
 - **Buffer Circular:** Utilizado para el cálculo de promedios móviles, garantizando que las agujas de los medidores se muevan con suavidad.
