@@ -28,8 +28,8 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "mqtt_client.h"
-#include "nvs_flash.h"
-#include "esp_random.h"
+#include "esp_spiffs.h"
+#include <dirent.h>
 
 static const char *TAG = "SOLAR";
 
@@ -59,6 +59,9 @@ static const char *TAG = "SOLAR";
 #define MQTT_TOPIC_PUB_FAST "solar/status/fast" // 10Hz: Ángulos y Potencia Instantánea
 #define MQTT_TOPIC_PUB_SLOW "solar/status/slow" // 1Hz: GPS, Hora, Promedios e Info
 #define MQTT_TOPIC_SUB "solar/cmd"              // ESP32 escucha comandos aquí
+#define MQTT_TOPIC_APP_STATUS "solar/app/status" // Status de la App (online/offline)
+#define MQTT_TOPIC_DATA_BATCH "solar/data/batch" // Envío de registros históricos
+#define MQTT_TOPIC_DATA_ACK   "solar/data/ack"   // Confirmación de recepción de la App
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ─── Pines INA3221 ───────────────────────────────────────────────────────────
@@ -310,6 +313,25 @@ typedef struct {
 static INA_Promedio_t prom_ch1 = {0};
 static INA_Promedio_t prom_ch2 = {0};
 
+// ─── DATALOGGER SPIFFS (REGISTRO HISTÓRICO) ──────────────────────────────────
+#define DATALOG_ACK_TIMEOUT_MS    10000   // espera máxima por ACK
+#define DATALOG_MAX_RETRIES       3       // reintentos por registro
+#define DATALOG_RETRY_DELAY_MS    60000   // pausa tras agotar reintentos
+#define DATALOG_BATCH_INTERVAL_MS 500     // delay entre registros consecutivos
+#define DATALOG_MAX_ERROR_RATE    0.20    // 20% de error permitido
+#define DATALOG_MIN_RECORDS       10      // mínimo de registros para evaluar tasa de error
+
+typedef enum {
+    DATALOG_OK,
+    DATALOG_DISABLED,
+    DATALOG_MOUNT_FAILED,
+} datalog_state_t;
+
+static datalog_state_t g_datalog_state = DATALOG_DISABLED;
+static bool g_descarga_en_curso = false;
+static char g_last_ack_id[12] = {0};
+static SemaphoreHandle_t g_sem_ack = NULL;
+
 // ─── Prototipos ──────────────────────────────────────────────────────────────
 static void pwm_init(void);
 static uint32_t us_to_duty(int us);
@@ -339,6 +361,13 @@ static void tarea_gps(void *arg);
 static void tarea_principal(void *arg);
 static void timer_movimiento_callback(void *arg);
 static void Publicar_Batch_Potencia_MQTT(void);
+static void Datalogger_Init(void);
+static void Datalogger_Escribir_Punto(void);
+static void Datalogger_Tarea_Descarga(void *arg);
+static int Datalogger_Contar_Pendientes(void);
+static void Datalogger_Truncar_Corrupto(const char* path);
+static void Procesar_Status_App(const char *datos, int len);
+static void Procesar_ACK_Datalogger(const char *datos, int len);
 
 // ─── Prototipos INA3221 ──────────────────────────────────────────────────────
 static esp_err_t ina3221_write_reg(uint8_t reg, uint16_t value);
@@ -431,6 +460,7 @@ void app_main(void) {
 
   // 6. INICIALIZACIÓN DEL STACK DE RED (OS / LwIP)
   // ────────────────────────────────────────────────────────
+  Datalogger_Init();
   wifi_init();
   mqtt_init();
   session_id = esp_random() % 10000; // Generar ID de sesión (0-9999)
@@ -597,10 +627,10 @@ static void tarea_principal(void *arg) {
       }
     }
 
-    // 3. TELEMETRÍA MULTINIVEL (2Hz / 1Hz)
+    // 3. TELEMETRÍA MULTINIVEL (4Hz / 1Hz)
     if (mqtt_conectado) {
-      if (ahora_us - ultimo_pub_rapido >= 500000LL) {
-        Publicar_Estado_Rapido_MQTT(); // Bajado a 2Hz (500ms) para estabilidad
+      if (ahora_us - ultimo_pub_rapido >= 250000LL) {
+        Publicar_Estado_Rapido_MQTT(); // Restaurado a 4Hz (250ms) para fluidez
         ultimo_pub_rapido = ahora_us;
       }
 
@@ -1978,11 +2008,18 @@ static void ina_actualizar_promedio(INA_Promedio_t *p, float v, float i,
       // tiempo_tramo = 5 minutos = 1/12 horas.
       float energia_tramo_mwh = (promedio_5min * 1000.0f) / 12.0f;
       p->energia_acumulada_mwh += energia_tramo_mwh;
+      p->ultimo_promedio_5min = promedio_5min * 1000.0f;
+    } else {
+      p->ultimo_promedio_5min = 0.0f;
     }
 
     // Reiniciar acumulador para el próximo bloque de 5 minutos
     p->acum_p = 0.0f;
     p->acum_n = 0;
+
+    if (p == &prom_ch1) {
+        Datalogger_Escribir_Punto();
+    }
   }
 }
 
@@ -2135,6 +2172,8 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
     ultimo_mqtt_connect_us = esp_timer_get_time();
     ESP_LOGI(TAG, "MQTT conectado");
     esp_mqtt_client_subscribe(mqtt_client, MQTT_TOPIC_SUB, 1);
+    esp_mqtt_client_subscribe(mqtt_client, MQTT_TOPIC_APP_STATUS, 1);
+    esp_mqtt_client_subscribe(mqtt_client, MQTT_TOPIC_DATA_ACK, 1);
     break;
 
   case MQTT_EVENT_DISCONNECTED:
@@ -2164,8 +2203,13 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
 
   case MQTT_EVENT_DATA:
     // RECEPCIÓN DE COMANDOS: Desvía el payload al parser de comandos remoto.
-    ESP_LOGI(TAG, "MQTT: Payload recibido. Procesando comando...");
-    Procesar_Comando_MQTT(event->data, event->data_len);
+    if (strncmp(event->topic, MQTT_TOPIC_SUB, event->topic_len) == 0) {
+        Procesar_Comando_MQTT(event->data, event->data_len);
+    } else if (strncmp(event->topic, MQTT_TOPIC_APP_STATUS, event->topic_len) == 0) {
+        Procesar_Status_App(event->data, event->data_len);
+    } else if (strncmp(event->topic, MQTT_TOPIC_DATA_ACK, event->topic_len) == 0) {
+        Procesar_ACK_Datalogger(event->data, event->data_len);
+    }
     break;
 
   default:
@@ -2195,4 +2239,193 @@ static void mqtt_init(void) {
   esp_mqtt_client_register_event(mqtt_client, ESP_EVENT_ANY_ID,
                                  mqtt_event_handler, NULL);
   esp_mqtt_client_start(mqtt_client);
+}
+
+// ─── DATALOGGER: IMPLEMENTACIÓN DE ESTRATEGIA SPIFFS ─────────────────────────
+
+static void Datalogger_Init(void) {
+    ESP_LOGI("DATALOG", "Inicializando SPIFFS...");
+    
+    esp_vfs_spiffs_conf_t conf = {
+      .base_path = "/spiffs",
+      .partition_label = NULL,
+      .max_files = 5,
+      .format_if_mount_failed = false
+    };
+
+    esp_err_t ret = esp_vfs_spiffs_register(&conf);
+
+    if (ret != ESP_OK) {
+        ESP_LOGW("DATALOG", "Nivel 2: Intentando reparar inconsistencias...");
+        if (esp_spiffs_check(conf.partition_label) == ESP_OK) {
+             ret = esp_vfs_spiffs_register(&conf);
+        }
+        
+        if (ret != ESP_OK) {
+             ESP_LOGW("DATALOG", "Nivel 3: Formateando partición...");
+             conf.format_if_mount_failed = true;
+             ret = esp_vfs_spiffs_register(&conf);
+        }
+    }
+
+    if (ret == ESP_OK) {
+        size_t total = 0, used = 0;
+        esp_spiffs_info(NULL, &total, &used);
+        ESP_LOGI("DATALOG", "SPIFFS OK. Capacidad: %d KB, Usado: %d KB", (int)total/1024, (int)used/1024);
+        g_datalog_state = DATALOG_OK;
+        
+        if (tiempo_local.ano >= 2024) {
+            char path[32];
+            snprintf(path, sizeof(path), "/spiffs/%04d%02d%02d.csv", tiempo_local.ano, tiempo_local.mes, tiempo_local.dia);
+            Datalogger_Truncar_Corrupto(path);
+        }
+    } else {
+        g_datalog_state = DATALOG_MOUNT_FAILED;
+        ESP_LOGE("DATALOG", "Fallo crítico al montar SPIFFS");
+    }
+    
+    g_sem_ack = xSemaphoreCreateBinary();
+}
+
+static void Datalogger_Truncar_Corrupto(const char* path) {
+    FILE* f = fopen(path, "r+");
+    if (!f) return;
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    if (size < 10) { fclose(f); return; }
+    fclose(f);
+}
+
+static void Datalogger_Escribir_Punto(void) {
+    if (g_datalog_state != DATALOG_OK) return;
+    if (tiempo_local.ano < 2024) return;
+
+    char path[32];
+    snprintf(path, sizeof(path), "/spiffs/%04d%02d%02d.csv", tiempo_local.ano, tiempo_local.mes, tiempo_local.dia);
+
+    bool exists = (access(path, F_OK) == 0);
+    FILE* f = fopen(path, "a");
+    if (!f) {
+        ESP_LOGE("DATALOG", "Error de escritura en SPIFFS");
+        return;
+    }
+
+    if (!exists) {
+        fprintf(f, "csv# lat=%.4f,lon=%.4f,fecha=%04d-%02d-%02d\n",
+                gps_solar_real.latitud_deg, gps_solar_real.longitud_deg,
+                tiempo_local.ano, tiempo_local.mes, tiempo_local.dia);
+        fprintf(f, "hora_utc,p1_avg_mw,p2_avg_mw,modo,estado\n");
+    }
+
+    char modo = sys_ctrl.servo_manual ? 'M' : 'A';
+    fprintf(f, "%02d:%02d:%02d,%.2f,%.2f,%c,0\n",
+            tiempo_local.hora, tiempo_local.min, tiempo_local.seg,
+            prom_ch1.ultimo_promedio_5min, prom_ch2.ultimo_promedio_5min,
+            modo);
+
+    fclose(f);
+    ESP_LOGI("DATALOG", "Datalog: punto guardado en %s", path);
+}
+
+static int Datalogger_Contar_Pendientes(void) {
+    int total_pendientes = 0;
+    DIR* dr = opendir("/spiffs");
+    if (!dr) return 0;
+
+    struct dirent* de;
+    while ((de = readdir(dr)) != NULL) {
+        if (strstr(de->d_name, ".csv")) {
+            char path[64];
+            snprintf(path, sizeof(path), "/spiffs/%s", de->d_name);
+            FILE* f = fopen(path, "r");
+            if (f) {
+                char line[128];
+                while (fgets(line, sizeof(line), f)) {
+                    int len = strlen(line);
+                    if (len > 2 && line[len-2] == '0') total_pendientes++;
+                }
+                fclose(f);
+            }
+        }
+    }
+    closedir(dr);
+    return total_pendientes;
+}
+
+static void Datalogger_Tarea_Descarga(void *arg) {
+    g_descarga_en_curso = true;
+    DIR* dr = opendir("/spiffs");
+    if (!dr) { g_descarga_en_curso = false; vTaskDelete(NULL); return; }
+
+    struct dirent* de;
+    int enviados = 0, errores = 0, intentos = 0;
+
+    while ((de = readdir(dr)) != NULL && g_descarga_en_curso) {
+        if (!strstr(de->d_name, ".csv")) continue;
+        char path[64];
+        snprintf(path, sizeof(path), "/spiffs/%s", de->d_name);
+        FILE* f = fopen(path, "r+");
+        if (!f) continue;
+
+        char line[128];
+        long line_pos = 0;
+        while (fgets(line, sizeof(line), f) && g_descarga_en_curso) {
+            int len = strlen(line);
+            if (len > 2 && line[len-2] == '0') {
+                intentos++;
+                char hora[9], p1[10], p2[10], mod;
+                if (sscanf(line, "%8[^,],%[^,],%[^,],%c,0", hora, p1, p2, &mod) == 4) {
+                    char json[192];
+                    snprintf(json, sizeof(json), "{\"sid\":%u,\"id\":\"%s\",\"p1\":%s,\"p2\":%s,\"m\":\"%c\",\"part\":0,\"last\":false}",
+                             (unsigned int)session_id, hora, p1, p2, mod);
+                    
+                    bool success = false;
+                    for (int r=0; r<DATALOG_MAX_RETRIES && !success; r++) {
+                        esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC_DATA_BATCH, json, 0, 1, 0);
+                        if (xSemaphoreTake(g_sem_ack, pdMS_TO_TICKS(DATALOG_ACK_TIMEOUT_MS)) == pdTRUE) {
+                            if (strcmp(g_last_ack_id, hora) == 0) success = true;
+                        }
+                        if (!success) { errores++; vTaskDelay(pdMS_TO_TICKS(1000)); }
+                    }
+                    if (success) {
+                        fseek(f, line_pos + len - 2, SEEK_SET);
+                        fputc('1', f);
+                        fflush(f);
+                        enviados++;
+                    }
+                }
+                vTaskDelay(pdMS_TO_TICKS(DATALOG_BATCH_INTERVAL_MS));
+                if (intentos >= DATALOG_MIN_RECORDS && ((float)errores/intentos) > DATALOG_MAX_ERROR_RATE) {
+                    g_descarga_en_curso = false;
+                }
+            }
+            line_pos = ftell(f);
+        }
+        fclose(f);
+    }
+    closedir(dr);
+    char res[100];
+    snprintf(res, sizeof(res), "descarga completa: %d/%d registros, %d errores", enviados, enviados + errores, errores);
+    esp_mqtt_client_publish(mqtt_client, "solar/app/status", res, 0, 1, 0);
+    g_descarga_en_curso = false;
+    vTaskDelete(NULL);
+}
+
+static void Procesar_Status_App(const char *datos, int len) {
+    if (strncmp(datos, "online", 6) == 0) {
+        if (g_descarga_en_curso) return;
+        int p = Datalogger_Contar_Pendientes();
+        if (p == 0) esp_mqtt_client_publish(mqtt_client, "solar/app/status", "sin datos pendientes", 0, 1, 0);
+        else if (p < 5) {
+            char m[50]; snprintf(m, sizeof(m), "hay %d registros pendientes. ¿descargar?", p);
+            esp_mqtt_client_publish(mqtt_client, "solar/app/status", m, 0, 1, 0);
+        } else xTaskCreate(Datalogger_Tarea_Descarga, "descarga_task", 4096, NULL, 2, NULL);
+    }
+}
+
+static void Procesar_ACK_Datalogger(const char *datos, int len) {
+    int n = len < sizeof(g_last_ack_id) ? len : sizeof(g_last_ack_id) - 1;
+    memcpy(g_last_ack_id, datos, n);
+    g_last_ack_id[n] = '\0';
+    xSemaphoreGive(g_sem_ack);
 }

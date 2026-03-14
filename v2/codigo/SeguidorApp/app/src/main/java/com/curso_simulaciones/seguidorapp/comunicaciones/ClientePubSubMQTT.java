@@ -24,7 +24,7 @@ public class ClientePubSubMQTT implements MqttCallback, IMqttActionListener {
     private String topicSubSlow;
     private String topicSubBatch;
     private String topicPub;
-    
+
     private java.util.concurrent.ConcurrentLinkedQueue<String> colaMensajes = new java.util.concurrent.ConcurrentLinkedQueue<>();
 
     private static final String TAG = "ClientePubSubMQTT";
@@ -40,9 +40,10 @@ public class ClientePubSubMQTT implements MqttCallback, IMqttActionListener {
     public void conectar() {
         String clientId = MqttClient.generateClientId();
         Log.d(TAG, "Intentando conectar a: " + AlmacenDatosRAM.MQTTHOST + " con ID: " + clientId);
-        client = new MqttAndroidClient(actividad.getApplicationContext(), AlmacenDatosRAM.MQTTHOST, clientId, Ack.AUTO_ACK);
+        client = new MqttAndroidClient(actividad.getApplicationContext(), AlmacenDatosRAM.MQTTHOST, clientId,
+                Ack.AUTO_ACK);
         client.setCallback(this);
-        
+
         MqttConnectOptions options = new MqttConnectOptions();
         options.setUserName(AlmacenDatosRAM.USERNAME);
         options.setPassword(AlmacenDatosRAM.PASSWORD.toCharArray());
@@ -65,6 +66,10 @@ public class ClientePubSubMQTT implements MqttCallback, IMqttActionListener {
             client.subscribe(topicSubFast, 0);
             client.subscribe(topicSubSlow, 0);
             client.subscribe(topicSubBatch, 0);
+
+            // Notificar presencia para activar descarga de Datalogger
+            publicar("solar/app/status", "online");
+
             AlmacenDatosRAM.conectado_PubSub = "Monitoreo activado (FAST/SLOW/BATCH)";
             AlmacenDatosRAM.conectado = true;
         } catch (Exception e) {
@@ -103,7 +108,6 @@ public class ClientePubSubMQTT implements MqttCallback, IMqttActionListener {
         }
     }
 
-
     @Override
     public void deliveryComplete(IMqttDeliveryToken token) {
     }
@@ -113,14 +117,19 @@ public class ClientePubSubMQTT implements MqttCallback, IMqttActionListener {
     }
 
     public void publicar(String payload) {
+        publicar(null, payload);
+    }
+
+    public void publicar(String topic, String payload) {
         if (AlmacenDatosRAM.conectado && client != null) {
             try {
+                String targetTopic = (topic == null) ? topicPub : topic;
                 MqttMessage message = new MqttMessage();
                 message.setPayload(payload.getBytes());
                 message.setQos(0);
-                client.publish(topicPub, message);
+                client.publish(targetTopic, message);
             } catch (Exception e) {
-                Log.e(TAG, "Error al publicar", e);
+                Log.e(TAG, "Error al publicar en " + topic, e);
             }
         }
     }

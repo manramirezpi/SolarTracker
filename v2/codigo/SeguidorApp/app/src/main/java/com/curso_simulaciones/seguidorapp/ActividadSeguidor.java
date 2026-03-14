@@ -25,16 +25,22 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * Controlador principal de la aplicación SeguidorApp (Capa "Controlador" en el patrón MVC/MVP).
+ * Controlador principal de la aplicación SeguidorApp (Capa "Controlador" en el
+ * patrón MVC/MVP).
  * 
- * Tras el refactoring arquitectónico de v2.0, esta clase ya no maneja la instanciación 
+ * Tras el refactoring arquitectónico de v2.0, esta clase ya no maneja la
+ * instanciación
  * visual ni el procesamiento pesado de tramas de telemetría.
  * 
  * Sus tres responsabilidades únicas (Single-Responsibility) son:
- * 1. Gestionar el ciclo de vida de la Actividad en Android (onCreate, onDestroy, onRestart).
- * 2. Manejar los eventos del usuario (OnTouch, OnClick) generados por la capa Vista (GeneradorUI).
- * 3. Ejecutar y administrar el Hilo en segundo plano (run) que extrae los datos de la red 
- *    (ClientePubSubMQTT), los envía a procesamiento (ProcesadorTelemetria) y notifica a la Vista.
+ * 1. Gestionar el ciclo de vida de la Actividad en Android (onCreate,
+ * onDestroy, onRestart).
+ * 2. Manejar los eventos del usuario (OnTouch, OnClick) generados por la capa
+ * Vista (GeneradorUI).
+ * 3. Ejecutar y administrar el Hilo en segundo plano (run) que extrae los datos
+ * de la red
+ * (ClientePubSubMQTT), los envía a procesamiento (ProcesadorTelemetria) y
+ * notifica a la Vista.
  */
 public class ActividadSeguidor extends Activity implements Runnable {
 
@@ -45,12 +51,12 @@ public class ActividadSeguidor extends Activity implements Runnable {
     private Thread hilo;
     private final Handler myHandler = new Handler();
 
-    private boolean intervencionGPS = false;   // Prioridad manual sobre coordenadas
+    private boolean intervencionGPS = false; // Prioridad manual sobre coordenadas
     private boolean intervencionServo = false; // Prioridad manual sobre ángulos servo
-    private long lastManualInteractionTime = 0; 
-    private long ultimoTiempoPublishGPS = 0;   // Throttling MQTT GPS
+    private long lastManualInteractionTime = 0;
+    private long ultimoTiempoPublishGPS = 0; // Throttling MQTT GPS
     private long ultimoTiempoPublishServo = 0; // Throttling MQTT Servos
-    private static final long MANUAL_LOCKOUT_MS = 3000; 
+    private static final long MANUAL_LOCKOUT_MS = 3000;
     private volatile boolean threadRunning = true; // Control del hilo
 
     @Override
@@ -103,17 +109,22 @@ public class ActividadSeguidor extends Activity implements Runnable {
                 float lat = (progress - 9000) / 100f;
                 ui.labelLat.setText(String.format("Lat: %.2f", lat));
                 if (fromUser) {
-                    intervencionGPS = true;   // Usuario toma prioridad en GPS
+                    intervencionGPS = true; // Usuario toma prioridad en GPS
                     intervencionServo = false; // Al mover coords, liberamos los servos para que sigan al nuevo punto
-                    lastManualInteractionTime = System.currentTimeMillis(); 
+                    lastManualInteractionTime = System.currentTimeMillis();
                     if (System.currentTimeMillis() - ultimoTiempoPublishGPS > 150) {
                         publicarComando("set_lat", lat, true);
                         ultimoTiempoPublishGPS = System.currentTimeMillis();
                     }
                 }
             }
-            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
-            @Override public void onStopTrackingTouch(SeekBar seekBar) {
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
                 float lat = (seekBar.getProgress() - 9000) / 100f;
                 publicarComando("set_lat", lat, true);
             }
@@ -125,17 +136,22 @@ public class ActividadSeguidor extends Activity implements Runnable {
                 float lon = (progress - 18000) / 100f;
                 ui.labelLon.setText(String.format("Lon: %.2f", lon));
                 if (fromUser) {
-                    intervencionGPS = true;   
-                    intervencionServo = false; 
-                    lastManualInteractionTime = System.currentTimeMillis(); 
+                    intervencionGPS = true;
+                    intervencionServo = false;
+                    lastManualInteractionTime = System.currentTimeMillis();
                     if (System.currentTimeMillis() - ultimoTiempoPublishGPS > 150) {
                         publicarComando("set_lon", lon, true);
                         ultimoTiempoPublishGPS = System.currentTimeMillis();
                     }
                 }
             }
-            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
-            @Override public void onStopTrackingTouch(SeekBar seekBar) {
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
                 float lon = (seekBar.getProgress() - 18000) / 100f;
                 publicarComando("set_lon", lon, true);
             }
@@ -144,7 +160,7 @@ public class ActividadSeguidor extends Activity implements Runnable {
         ui.sliderTiempo.setOnValueChangeListener(value -> {
             AlmacenDatosRAM.factor_vel = value;
             // El tiempo suele ir ligado al GPS, pero lo tratamos como intervención GPS
-            intervencionGPS = true; 
+            intervencionGPS = true;
             publicarComando("set_vel", value, true);
         });
 
@@ -163,8 +179,13 @@ public class ActividadSeguidor extends Activity implements Runnable {
                     }
                 }
             }
-            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
-            @Override public void onStopTrackingTouch(SeekBar seekBar) {
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
                 int valorReal = seekBar.getProgress() - 90;
                 publicarComando("set_ser_az", valorReal, true);
             }
@@ -176,15 +197,20 @@ public class ActividadSeguidor extends Activity implements Runnable {
                 ui.labelManualEl.setText("Manual El: " + progress + "°");
                 if (fromUser) {
                     intervencionServo = true; // El usuario toma prioridad absoluta
-                    lastManualInteractionTime = System.currentTimeMillis(); 
+                    lastManualInteractionTime = System.currentTimeMillis();
                     if (System.currentTimeMillis() - ultimoTiempoPublishServo > 150) {
                         publicarComando("set_ser_el", progress, true);
                         ultimoTiempoPublishServo = System.currentTimeMillis();
                     }
                 }
             }
-            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
-            @Override public void onStopTrackingTouch(SeekBar seekBar) {
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
                 publicarComando("set_ser_el", seekBar.getProgress(), true);
             }
         });
@@ -201,8 +227,9 @@ public class ActividadSeguidor extends Activity implements Runnable {
 
     private void compartirArchivos() {
         File folder = getExternalFilesDir(null);
-        if (folder == null) return;
-        
+        if (folder == null)
+            return;
+
         File[] files = folder.listFiles((dir, name) -> name.endsWith(".txt") && !name.startsWith("RECEP_"));
         if (files == null || files.length == 0) {
             AlmacenDatosRAM.conectado_PubSub = "No hay archivos para compartir";
@@ -237,9 +264,9 @@ public class ActividadSeguidor extends Activity implements Runnable {
     }
 
     private void sincronizarControles() {
-        AlmacenDatosRAM.resetStats(); 
+        AlmacenDatosRAM.resetStats();
         intervencionGPS = false;
-        intervencionServo = false; 
+        intervencionServo = false;
         lastManualInteractionTime = 0; // Permitir el seguimiento inmediato tras el reset
 
         // Sincronizar GPS
@@ -247,11 +274,11 @@ public class ActividadSeguidor extends Activity implements Runnable {
         int progLon = (int) (AlmacenDatosRAM.lon * 100 + 18000);
         ui.sliderLat.setProgress(progLat);
         ui.sliderLon.setProgress(progLon);
-        
+
         // Sincronizar Manuales con posición real
         ui.sliderManualAz.setProgress((int) AlmacenDatosRAM.servo_az + 90);
         ui.sliderManualEl.setProgress((int) AlmacenDatosRAM.servo_el);
-        
+
         // Resetear velocidad
         ui.sliderTiempo.setValue(1.0f);
         actualizarEstadoModo(AlmacenDatosRAM.modo.equals("AUTO"));
@@ -262,7 +289,7 @@ public class ActividadSeguidor extends Activity implements Runnable {
         ui.btnAuto.getBackground().setColorFilter(isAuto ? ui.COLOR_ACCENT : Color.LTGRAY, PorterDuff.Mode.MULTIPLY);
         ui.btnMan.setTextColor(!isAuto ? Color.WHITE : ui.COLOR_TEXTO_SEC);
         ui.btnMan.getBackground().setColorFilter(!isAuto ? ui.COLOR_ACCENT : Color.LTGRAY, PorterDuff.Mode.MULTIPLY);
-        
+
         // Bloquear/Desbloquear sliders manuales según el modo
         ui.sliderManualAz.setEnabled(!isAuto);
         ui.sliderManualEl.setEnabled(!isAuto);
@@ -287,10 +314,10 @@ public class ActividadSeguidor extends Activity implements Runnable {
         }
     }
 
-
     /**
      * Hilo en segundo plano de alta reactividad.
-     * Lee continuamente del buffer MQTT, decodifica a través de ProcesadorTelemetria 
+     * Lee continuamente del buffer MQTT, decodifica a través de
+     * ProcesadorTelemetria
      * y ordena refrescar la Vista solo cuando hay datos nuevos.
      */
     @Override
@@ -302,14 +329,22 @@ public class ActividadSeguidor extends Activity implements Runnable {
                 boolean uiRequiereUpdate = false;
                 String data;
                 // Drena la cola completamente antes de actualizar la UI
-                // Esto garantiza que el reloj avance a saltos exactos sin retrasos por acumulación
+                // Esto garantiza que el reloj avance a saltos exactos sin retrasos por
+                // acumulación
                 while ((data = cliente.leerString()) != null) {
                     if (procesadorTelemetria.procesarDato(data, this)) {
                         myHandler.post(this::sincronizarControles); // Handler nativo para tocar la UI
                     }
+
+                    // GESTIÓN DE ACK (Confirmación de Datalogger)
+                    if (AlmacenDatosRAM.pendingAckId != null) {
+                        cliente.publicar("solar/data/ack", AlmacenDatosRAM.pendingAckId);
+                        AlmacenDatosRAM.pendingAckId = null; // Limpiar para el siguiente
+                    }
+
                     uiRequiereUpdate = true;
                 }
-                
+
                 if (uiRequiereUpdate) {
                     myHandler.post(this::actualizarUI);
                 }
@@ -322,7 +357,8 @@ public class ActividadSeguidor extends Activity implements Runnable {
     @Override
     protected void onRestart() {
         super.onRestart();
-        // Cuando Android resume la app, el sistema puede haber matado el socket en segundo plano.
+        // Cuando Android resume la app, el sistema puede haber matado el socket en
+        // segundo plano.
         // Forzamos un reinicio de la conexión MQTT de forma segura.
         if (cliente != null) {
             AlmacenDatosRAM.conectado_PubSub = "Restaurando conexión MQTT...";
@@ -354,7 +390,10 @@ public class ActividadSeguidor extends Activity implements Runnable {
 
         float eAz = AlmacenDatosRAM.servo_az - AlmacenDatosRAM.sol_az;
         float eEl = AlmacenDatosRAM.servo_el - AlmacenDatosRAM.sol_el;
-        if (eAz > 180) eAz -= 360; if (eAz < -180) eAz += 360; // Normalización Azimut
+        if (eAz > 180)
+            eAz -= 360;
+        if (eAz < -180)
+            eAz += 360; // Normalización Azimut
 
         ui.errAz.setText(String.format("%+.1f°", eAz));
         ui.errEl.setText(String.format("%+.1f°", eEl));
@@ -377,8 +416,10 @@ public class ActividadSeguidor extends Activity implements Runnable {
         }
 
         // --- 3. HEALTH DASHBOARD ---
-        if (!AlmacenDatosRAM.conectado) AlmacenDatosRAM.health_mqtt = 0;
-        else if (AlmacenDatosRAM.health_mqtt == 0) AlmacenDatosRAM.health_mqtt = 2; // Green if connected unless ESP32 says otherwise
+        if (!AlmacenDatosRAM.conectado)
+            AlmacenDatosRAM.health_mqtt = 0;
+        else if (AlmacenDatosRAM.health_mqtt == 0)
+            AlmacenDatosRAM.health_mqtt = 2; // Green if connected unless ESP32 says otherwise
 
         ui.actualizarEstadoIcono(ui.iconHealthMqtt, AlmacenDatosRAM.health_mqtt);
         ui.actualizarEstadoIcono(ui.iconHealthGps, AlmacenDatosRAM.health_gps);

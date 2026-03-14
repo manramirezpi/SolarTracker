@@ -9,10 +9,10 @@ import java.util.Locale;
 import android.content.Context;
 
 /**
- * Especialista en decodificar secuencias String del protocolo MQTT 
+ * Especialista en decodificar secuencias String del protocolo MQTT
  * y alimentar/actualizar la RAM estática del sistema.
  * 
- * Implementa un mecanismo (Bypass GC) para los datos de alta frecuencia que 
+ * Implementa un mecanismo (Bypass GC) para los datos de alta frecuencia que
  * recicla memoria nativa evitando la creación excesiva de objetos JSON.
  */
 public class ProcesadorTelemetria {
@@ -26,10 +26,16 @@ public class ProcesadorTelemetria {
 
     public boolean procesarDato(String data, Context context) {
         try {
+            // DETECCIÓN DE DATOS HISTÓRICOS (Datalogger)
+            if (data.contains("\"m\":") && data.contains("\"p1\":")) {
+                guardarHistoricoCsv(data, context);
+                return false;
+            }
+
             // DETECCIÓN DE LOTE DE DATOS (Calibración)
             if (data.contains("\"part\":")) {
                 guardarBatchTxt(data, context);
-                return false; 
+                return false;
             }
 
             // ESTRATEGIA DE OPTIMIZACIÓN (Garbage Collector Bypass)
@@ -40,15 +46,15 @@ public class ProcesadorTelemetria {
 
                 AlmacenDatosRAM.sol_az = extraerFloat(data, "\"az\":", idxSol);
                 AlmacenDatosRAM.sol_el = extraerFloat(data, "\"el\":", idxSol);
-                
+
                 AlmacenDatosRAM.servo_az = extraerFloat(data, "\"az\":", idxServos);
                 AlmacenDatosRAM.servo_el = extraerFloat(data, "\"el\":", idxServos);
-                
+
                 AlmacenDatosRAM.p1_inst = extraerFloat(data, "\"c1\":", idxP);
                 AlmacenDatosRAM.p1_avg_dia = extraerFloat(data, "\"a1\":", idxP);
                 AlmacenDatosRAM.p2_inst = extraerFloat(data, "\"c2\":", idxP);
                 AlmacenDatosRAM.p2_avg_dia = extraerFloat(data, "\"a2\":", idxP);
-                
+
                 // Actualización de media móvil local para suavizado de gauges
                 contadorMuestreoPotencia++;
                 if (contadorMuestreoPotencia % 5 == 0) {
@@ -59,7 +65,7 @@ public class ProcesadorTelemetria {
                 }
                 return false; // Fast tramas no traen datos de GPS inicial
             }
-            
+
             // --- PROCESAMIENTO CANAL LENTO (1Hz) ---
             JSONObject obj = new JSONObject(data);
 
@@ -74,10 +80,10 @@ public class ProcesadorTelemetria {
                     AlmacenDatosRAM.gps_valido = String.valueOf(validoObj).equalsIgnoreCase("true");
                 }
             }
-            
+
             AlmacenDatosRAM.fecha = obj.optString("fecha", AlmacenDatosRAM.fecha);
             AlmacenDatosRAM.hora = obj.optString("hora", AlmacenDatosRAM.hora);
-            
+
             if (obj.has("health")) {
                 JSONObject health = obj.getJSONObject("health");
                 AlmacenDatosRAM.health_mqtt = health.optInt("mqtt", 0);
@@ -85,7 +91,7 @@ public class ProcesadorTelemetria {
                 AlmacenDatosRAM.health_ina = health.optInt("ina", 0);
                 AlmacenDatosRAM.health_disk = health.optInt("disk", 0);
             }
-            
+
             if (obj.has("modo")) {
                 String modoPrincipal = obj.getString("modo");
                 String parking = obj.optString("parking", "false");
@@ -95,13 +101,13 @@ public class ProcesadorTelemetria {
                     AlmacenDatosRAM.modo = modoPrincipal;
                 }
             }
-            
+
             AlmacenDatosRAM.factor_vel = (float) obj.optDouble("v_sim", AlmacenDatosRAM.factor_vel);
 
             // Si es el primer dato que llega, avisamos para sincronizar sliders
             if (primeraVez && AlmacenDatosRAM.lat != 0) {
                 primeraVez = false;
-                return true; 
+                return true;
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -111,17 +117,22 @@ public class ProcesadorTelemetria {
 
     private float extraerFloat(String json, String key, int searchFromIndex) {
         int startIdx = json.indexOf(key, searchFromIndex);
-        if (startIdx == -1) return 0f;
+        if (startIdx == -1)
+            return 0f;
         startIdx += key.length();
         int endIdxComma = json.indexOf(',', startIdx);
         int endIdxBrace = json.indexOf('}', startIdx);
-        
+
         int endIdx;
-        if (endIdxComma == -1) endIdx = endIdxBrace;
-        else if (endIdxBrace == -1) endIdx = endIdxComma;
-        else endIdx = Math.min(endIdxComma, endIdxBrace);
-        
-        if (endIdx == -1) return 0f;
+        if (endIdxComma == -1)
+            endIdx = endIdxBrace;
+        else if (endIdxBrace == -1)
+            endIdx = endIdxComma;
+        else
+            endIdx = Math.min(endIdxComma, endIdxBrace);
+
+        if (endIdx == -1)
+            return 0f;
         try {
             return Float.parseFloat(json.substring(startIdx, endIdx));
         } catch (Exception e) {
@@ -136,16 +147,21 @@ public class ProcesadorTelemetria {
 
         if (count == AlmacenDatosRAM.MAX_HISTORICO) {
             float viejoValor = buffer[index];
-            if (esCanal1) AlmacenDatosRAM.sumaP1 -= viejoValor;
-            else AlmacenDatosRAM.sumaP2 -= viejoValor;
+            if (esCanal1)
+                AlmacenDatosRAM.sumaP1 -= viejoValor;
+            else
+                AlmacenDatosRAM.sumaP2 -= viejoValor;
         }
 
         buffer[index] = nuevoValor;
-        if (esCanal1) AlmacenDatosRAM.sumaP1 += nuevoValor;
-        else AlmacenDatosRAM.sumaP2 += nuevoValor;
+        if (esCanal1)
+            AlmacenDatosRAM.sumaP1 += nuevoValor;
+        else
+            AlmacenDatosRAM.sumaP2 += nuevoValor;
 
         index = (index + 1) % AlmacenDatosRAM.MAX_HISTORICO;
-        if (count < AlmacenDatosRAM.MAX_HISTORICO) count++;
+        if (count < AlmacenDatosRAM.MAX_HISTORICO)
+            count++;
 
         if (esCanal1) {
             AlmacenDatosRAM.indexP1 = index;
@@ -158,7 +174,8 @@ public class ProcesadorTelemetria {
 
     private float obtenerMediaCircular(boolean esCanal1) {
         int count = esCanal1 ? AlmacenDatosRAM.countP1 : AlmacenDatosRAM.countP2;
-        if (count == 0) return 0;
+        if (count == 0)
+            return 0;
         float suma = esCanal1 ? AlmacenDatosRAM.sumaP1 : AlmacenDatosRAM.sumaP2;
         return suma / count;
     }
@@ -172,15 +189,17 @@ public class ProcesadorTelemetria {
             boolean isLast = obj.optBoolean("last", false);
             boolean isTemp = obj.optBoolean("temp", false);
             String content = obj.optString("data", "");
-            
+
             // ESTRATEGIA DE ACUMULACIÓN MASIVA:
-            // Usamos un único archivo de trabajo para que sesiones cortas o perdidas alimenten el mismo set.
+            // Usamos un único archivo de trabajo para que sesiones cortas o perdidas
+            // alimenten el mismo set.
             File folder = context.getExternalFilesDir(null);
             File file = new File(folder, "FLUJO_POTENCIA_PENDIENTE.txt");
-            
+
             FileOutputStream out = new FileOutputStream(file, true); // SIEMPRE APPEN (true)
-            
-            // Si es el inicio de una ráfaga o una nueva sesión, ponemos una marca de trazabilidad
+
+            // Si es el inicio de una ráfaga o una nueva sesión, ponemos una marca de
+            // trazabilidad
             if (part == 0) {
                 String stamp = "\n# --- NUEVA SESIÓN/LOTE (SID:" + sessionId + " | ID:" + batchId + ") ---\n";
                 stamp += "# Fecha: " + new Date().toString() + "\n";
@@ -189,13 +208,13 @@ public class ProcesadorTelemetria {
 
             out.write(content.getBytes());
             out.close();
-            
+
             if (isLast) {
                 // Al completar la meta masiva (500), generamos el archivo final.
                 String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
                 String prefix = isTemp ? "SNAPSHOT_MASIVO_" : "DATA_MASIVA_";
                 String finalName = prefix + timestamp + ".txt";
-                
+
                 File finalFile = new File(folder, finalName);
                 if (file.renameTo(finalFile)) {
                     AlmacenDatosRAM.conectado_PubSub = "¡COLECCIÓN " + finalName + " GUARDADA!";
@@ -203,10 +222,42 @@ public class ProcesadorTelemetria {
             } else {
                 AlmacenDatosRAM.conectado_PubSub = "Alimentando colección masiva (L:" + batchId + " P:" + part + ")...";
             }
-            
+
         } catch (Exception e) {
             e.printStackTrace();
             AlmacenDatosRAM.conectado_PubSub = "Error al procesar telemetría de lote";
+        }
+    }
+
+    private void guardarHistoricoCsv(String jsonStr, Context context) {
+        try {
+            JSONObject obj = new JSONObject(jsonStr);
+            String id = obj.getString("id"); // "HH:MM:SS"
+            String p1 = obj.getString("p1");
+            String p2 = obj.getString("p2");
+            String modo = obj.getString("m");
+
+            // Nombre del archivo basado en la fecha del sistema Android
+            String fechaHoy = new SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(new Date());
+            File folder = context.getExternalFilesDir(null);
+            File file = new File(folder, "HISTORICO_" + fechaHoy + ".csv");
+
+            boolean nuevo = !file.exists();
+            FileOutputStream out = new FileOutputStream(file, true);
+            if (nuevo) {
+                // Cabecera simple para el CSV diario
+                out.write("hora_utc,p1_mw,p2_mw,modo\n".getBytes());
+            }
+            String linea = id + "," + p1 + "," + p2 + "," + modo + "\n";
+            out.write(linea.getBytes());
+            out.close();
+
+            // Activamos el ACK para que la Actividad lo envíe
+            AlmacenDatosRAM.pendingAckId = id;
+            AlmacenDatosRAM.conectado_PubSub = "Datalogger: registro " + id + " recibido";
+
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
 }
