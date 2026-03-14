@@ -33,6 +33,13 @@ public class AlmacenDatosRAM {
     public static volatile float lat = 0;
     public static volatile float lon = 0;
     public static volatile boolean gps_valido = false;
+    
+    // --- ESTADOS DE SALUD (HEALTH SYSTEM v2.1) ---
+    // 0: Error/Desconectado, 1: Advertencia/Ocupado, 2: Saludable/Fix
+    public static volatile int health_mqtt = 0;
+    public static volatile int health_gps = 0;
+    public static volatile int health_ina = 0;
+    public static volatile int health_disk = 0; // % de ocupación o estado datalogger
 
     // Fecha y Hora
     public static volatile String fecha = "--/--/----";

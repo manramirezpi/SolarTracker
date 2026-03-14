@@ -83,6 +83,15 @@ public class ActividadSeguidor extends Activity implements Runnable {
             }
         });
 
+        ui.btnAuto.setOnClickListener(v -> {
+            publicarComando("reset", 0, false);
+            actualizarEstadoModo(true);
+        });
+
+        ui.btnMan.setOnClickListener(v -> {
+            actualizarEstadoModo(false);
+        });
+
         ui.botonResetGPS.setOnClickListener(v -> {
             sincronizarControles();
             publicarComando("reset", 0, false);
@@ -232,6 +241,7 @@ public class ActividadSeguidor extends Activity implements Runnable {
         intervencionGPS = false;
         intervencionServo = false; 
         lastManualInteractionTime = 0; // Permitir el seguimiento inmediato tras el reset
+
         // Sincronizar GPS
         int progLat = (int) (AlmacenDatosRAM.lat * 100 + 9000);
         int progLon = (int) (AlmacenDatosRAM.lon * 100 + 18000);
@@ -244,6 +254,20 @@ public class ActividadSeguidor extends Activity implements Runnable {
         
         // Resetear velocidad
         ui.sliderTiempo.setValue(1.0f);
+        actualizarEstadoModo(AlmacenDatosRAM.modo.equals("AUTO"));
+    }
+
+    private void actualizarEstadoModo(boolean isAuto) {
+        ui.btnAuto.setTextColor(isAuto ? Color.WHITE : ui.COLOR_TEXTO_SEC);
+        ui.btnAuto.getBackground().setColorFilter(isAuto ? ui.COLOR_ACCENT : Color.LTGRAY, PorterDuff.Mode.MULTIPLY);
+        ui.btnMan.setTextColor(!isAuto ? Color.WHITE : ui.COLOR_TEXTO_SEC);
+        ui.btnMan.getBackground().setColorFilter(!isAuto ? ui.COLOR_ACCENT : Color.LTGRAY, PorterDuff.Mode.MULTIPLY);
+        
+        // Bloquear/Desbloquear sliders manuales según el modo
+        ui.sliderManualAz.setEnabled(!isAuto);
+        ui.sliderManualEl.setEnabled(!isAuto);
+        ui.labelManualAz.setAlpha(isAuto ? 0.5f : 1.0f);
+        ui.labelManualEl.setAlpha(isAuto ? 0.5f : 1.0f);
     }
 
     private void publicarComando(String cmd, float valor, boolean conValor) {
@@ -322,71 +346,63 @@ public class ActividadSeguidor extends Activity implements Runnable {
     }
 
     private void actualizarUI() {
-        ui.gaugeSolAz.setMedida(AlmacenDatosRAM.sol_az);
-        ui.gaugeSolEl.setMedida(AlmacenDatosRAM.sol_el);
-        ui.gaugeServoAz.setMedida(AlmacenDatosRAM.servo_az); // Valor fiel
-        ui.gaugeServoEl.setMedida(AlmacenDatosRAM.servo_el); // Valor fiel
+        // --- 1. TABLA DE TRACKING Y ERROR ---
+        ui.solAz.setText(String.format("%.1f°", AlmacenDatosRAM.sol_az));
+        ui.solEl.setText(String.format("%.1f°", AlmacenDatosRAM.sol_el));
+        ui.servoAz.setText(String.format("%.1f°", AlmacenDatosRAM.servo_az));
+        ui.servoEl.setText(String.format("%.1f°", AlmacenDatosRAM.servo_el));
 
-        // --- SINCRONIZACIÓN AUTOMÁTICA DE CONTROLES (FEEDBACK) ---
+        float eAz = AlmacenDatosRAM.servo_az - AlmacenDatosRAM.sol_az;
+        float eEl = AlmacenDatosRAM.servo_el - AlmacenDatosRAM.sol_el;
+        if (eAz > 180) eAz -= 360; if (eAz < -180) eAz += 360; // Normalización Azimut
+
+        ui.errAz.setText(String.format("%+.1f°", eAz));
+        ui.errEl.setText(String.format("%+.1f°", eEl));
+        ui.errAz.setTextColor(Math.abs(eAz) > 1.0 ? ui.COLOR_ERROR : ui.COLOR_ACCENT);
+        ui.errEl.setTextColor(Math.abs(eEl) > 1.0 ? ui.COLOR_ERROR : ui.COLOR_ACCENT);
+
+        // --- 2. BALANCE ENERGÉTICO ---
+        ui.p1Inst.setText(String.format("%.2f", AlmacenDatosRAM.p1_inst));
+        ui.p1Avg.setText(String.format("%.2f", AlmacenDatosRAM.p1_avg));
+        ui.p1Daily.setText(String.format("%.1f", AlmacenDatosRAM.p1_avg_dia));
+        ui.p2Inst.setText(String.format("%.2f", AlmacenDatosRAM.p2_inst));
+        ui.p2Avg.setText(String.format("%.2f", AlmacenDatosRAM.p2_avg));
+        ui.p2Daily.setText(String.format("%.1f", AlmacenDatosRAM.p2_avg_dia));
+
+        if (AlmacenDatosRAM.p2_avg_dia > 0.1f) {
+            float g = ((AlmacenDatosRAM.p1_avg_dia / AlmacenDatosRAM.p2_avg_dia) - 1) * 100;
+            ui.labelGanancia.setText(String.format("%+.1f%%", g));
+        } else {
+            ui.labelGanancia.setText("--- %");
+        }
+
+        // --- 3. HEALTH DASHBOARD ---
+        if (!AlmacenDatosRAM.conectado) AlmacenDatosRAM.health_mqtt = 0;
+        else if (AlmacenDatosRAM.health_mqtt == 0) AlmacenDatosRAM.health_mqtt = 2; // Green if connected unless ESP32 says otherwise
+
+        ui.actualizarEstadoIcono(ui.iconHealthMqtt, AlmacenDatosRAM.health_mqtt);
+        ui.actualizarEstadoIcono(ui.iconHealthGps, AlmacenDatosRAM.health_gps);
+        ui.actualizarEstadoIcono(ui.iconHealthIna, AlmacenDatosRAM.health_ina);
+        ui.actualizarEstadoIcono(ui.iconHealthLog, AlmacenDatosRAM.health_disk > 90 ? 1 : 2); // Warn if log > 90%
+
+        // --- 4. FEEDBACK DE CONTROLES ---
         long dt = System.currentTimeMillis() - lastManualInteractionTime;
-        
-        // 1. Sincronizar Sliders de Ubicación (GPS)
-        // Solo si NO hay intervención manual en GPS y ha pasado el tiempo de gracia
         if (!intervencionGPS && dt > MANUAL_LOCKOUT_MS) {
-            int progLat = Math.round(AlmacenDatosRAM.lat * 100 + 9000);
-            int progLon = Math.round(AlmacenDatosRAM.lon * 100 + 18000);
-            if (ui.sliderLat.getProgress() != progLat) ui.sliderLat.setProgress(progLat);
-            if (ui.sliderLon.getProgress() != progLon) ui.sliderLon.setProgress(progLon);
-
-            if (Math.abs(ui.sliderTiempo.getValue() - AlmacenDatosRAM.factor_vel) > 0.01f) {
-                ui.sliderTiempo.setValue(AlmacenDatosRAM.factor_vel);
-            }
+            ui.sliderLat.setProgress(Math.round(AlmacenDatosRAM.lat * 100 + 9000));
+            ui.sliderLon.setProgress(Math.round(AlmacenDatosRAM.lon * 100 + 18000));
+            ui.sliderTiempo.setValue(AlmacenDatosRAM.factor_vel);
         }
 
-        // 2. Sincronizar Sliders Manuales (Servo Feedback)
-        // Se sincronizan si ha pasado el tiempo de gracia (el usuario ya soltó el control)
         if (dt > MANUAL_LOCKOUT_MS) {
-            intervencionServo = false; // Liberamos el flag para que reanuden la telemetría real
-            int targetAz = Math.round(AlmacenDatosRAM.servo_az + 90); // Mapeo visual
-            int targetEl = Math.round(AlmacenDatosRAM.servo_el);
-            
-            if (ui.sliderManualAz.getProgress() != targetAz)
-                ui.sliderManualAz.setProgress(targetAz);
-            
-            if (ui.sliderManualEl.getProgress() != targetEl)
-                ui.sliderManualEl.setProgress(targetEl);
+            intervencionServo = false;
+            ui.sliderManualAz.setProgress(Math.round(AlmacenDatosRAM.servo_az + 90));
+            ui.sliderManualEl.setProgress(Math.round(AlmacenDatosRAM.servo_el));
+            actualizarEstadoModo(AlmacenDatosRAM.modo.equals("AUTO"));
         }
 
-        ui.textviewFechaHora.setText(AlmacenDatosRAM.fecha + " " + AlmacenDatosRAM.hora + " | Modo: " + AlmacenDatosRAM.modo);
+        ui.textviewFechaHora.setText(AlmacenDatosRAM.fecha + " " + AlmacenDatosRAM.hora);
         ui.textviewAviso.setText(AlmacenDatosRAM.conectado_PubSub);
-
-        // Actualizar Potencia Canal 1
-        ui.p1Inst.setText(String.format("Inst: %.4f mW", AlmacenDatosRAM.p1_inst));
-        ui.p1Avg.setText(String.format("Med: %.4f mW", AlmacenDatosRAM.p1_avg));
-        ui.p1Daily.setText(String.format("E: %.4f mWh", AlmacenDatosRAM.p1_avg_dia));
-
-        // Actualizar Potencia Canal 2
-        ui.p2Inst.setText(String.format("Inst: %.4f mW", AlmacenDatosRAM.p2_inst));
-        ui.p2Avg.setText(String.format("Med: %.4f mW", AlmacenDatosRAM.p2_avg));
-        ui.p2Daily.setText(String.format("E: %.4f mWh", AlmacenDatosRAM.p2_avg_dia));
-
-        // Cálculo Eficiencia
-        if (AlmacenDatosRAM.p2_avg > 0.001f) {
-            float ganancia = ((AlmacenDatosRAM.p1_avg_dia / AlmacenDatosRAM.p2_avg_dia) - 1) * 100;
-            ui.labelEficiencia.setText(String.format("Ganancia Móvil: %+.1f%%", ganancia));
-        } else {
-            ui.labelEficiencia.setText("Ganancia Móvil: --- %");
-        }
-
-        // Estado GPS
-        ui.labelEstadoGPS.setText(AlmacenDatosRAM.gps_valido ? "GPS: SEÑAL ESTABLE" : "GPS: BUSCANDO...");
-        ui.labelEstadoGPS.setTextColor(AlmacenDatosRAM.gps_valido ? Color.GREEN : Color.YELLOW);
-
-        if (AlmacenDatosRAM.conectado) {
-            ui.botonConectar.setText("DESCONECTAR");
-        } else {
-            ui.botonConectar.setText("CONECTAR");
-        }
+        ui.botonConectar.setText(AlmacenDatosRAM.conectado ? "DESCONECTAR" : "CONECTAR");
     }
 
     @Override

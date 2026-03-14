@@ -1425,6 +1425,7 @@ static void Publicar_Estado_Lento_MQTT(void) {
            "\"hora\":\"%02d:%02d:%02d\","
            "\"fecha\":\"%02d/%02d/%04d\","
            "\"gps\":{\"lat\":%.5f,\"lon\":%.5f,\"val\":%s},"
+           "\"health\":{\"mqtt\":2,\"gps\":%d,\"ina\":%d,\"disk\":0},"
            "\"modo\":\"%s\","
            "\"v_sim\":%d,"
            "\"parking\":%s"
@@ -1433,6 +1434,8 @@ static void Publicar_Estado_Lento_MQTT(void) {
            tiempo_local.dia, tiempo_local.mes, tiempo_local.ano,
            gps_solar_real.latitud_deg, gps_solar_real.longitud_deg,
            mi_gps.es_valido ? "true" : "false",
+           mi_gps.es_valido ? 2 : 1,
+           (Almacen_Energia.p1_v > 0.1) ? 2 : 1,
            sys_ctrl.simulacion_activa
                ? "SIM"
                : (sys_ctrl.servo_manual

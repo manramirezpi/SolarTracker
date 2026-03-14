@@ -78,6 +78,14 @@ public class ProcesadorTelemetria {
             AlmacenDatosRAM.fecha = obj.optString("fecha", AlmacenDatosRAM.fecha);
             AlmacenDatosRAM.hora = obj.optString("hora", AlmacenDatosRAM.hora);
             
+            if (obj.has("health")) {
+                JSONObject health = obj.getJSONObject("health");
+                AlmacenDatosRAM.health_mqtt = health.optInt("mqtt", 0);
+                AlmacenDatosRAM.health_gps = health.optInt("gps", 0);
+                AlmacenDatosRAM.health_ina = health.optInt("ina", 0);
+                AlmacenDatosRAM.health_disk = health.optInt("disk", 0);
+            }
+            
             if (obj.has("modo")) {
                 String modoPrincipal = obj.getString("modo");
                 String parking = obj.optString("parking", "false");
