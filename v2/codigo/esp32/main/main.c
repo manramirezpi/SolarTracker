@@ -38,14 +38,18 @@ static const char *TAG = "SOLAR";
 // #define WIFI_SSID "3210NX"
 // #define WIFI_PASSWORD "71671878"
 
-#define WIFI_SSID "3210NX"
-#define WIFI_PASSWORD "71671878"
+#define WIFI_BACKUP2_SSID "3210NX"
+#define WIFI_BACKUP2_PASSWORD "71671878"
 
 #define WIFI_BACKUP_SSID "321onx_REP"
 #define WIFI_BACKUP_PASSWORD "71671878"
 
-#define WIFI_BACKUP2_SSID "..."
-#define WIFI_BACKUP2_PASSWORD "123456789"
+#define WIFI_SSID "JP"
+#define WIFI_PASSWORD "551964jp"
+
+
+//#define WIFI_BACKUP2_SSID "..."
+//#define WIFI_BACKUP2_PASSWORD "123456789"
 
 #define MQTT_BROKER_URL "45.56.74.248"
 #define MQTT_BROKER_PORT 1883
@@ -254,12 +258,21 @@ static float ina_ch2_v = 0.0f;
 static float ina_ch2_i = 0.0f;
 static float ina_ch2_p = 0.0f;
 
-// ─── CAPTURA TEMPORAL PARA CALIBRACIÓN (BATCH 25) ────────────────────────────
-#define BATCH_SIZE 150
-static float batch_ch1[BATCH_SIZE];
-static float batch_ch2[BATCH_SIZE];
+// ─── CAPTURA Y STREAMING DE CALIBRACIÓN (BATCH SEGMENTADO) ────────────────────
+#define BATCH_GOAL 15           // Total de muestras a capturar antes de enviar
+#define BATCH_MAX 256            // Tamaño máximo del buffer físico
+#define CHUNK_SIZE 3            // Cantidad de datos por ráfaga MQTT
+static float batch_ch1[BATCH_MAX];
+static float batch_ch2[BATCH_MAX];
 static int batch_count = 0;
+static int batch_id = 0;
 static float last_batch_p1 = -100.0f;
+
+// Estado de la transmisión segmentada
+static bool streaming_activo = false;
+static int streaming_indice = 0;
+static int streaming_parte = 0;
+static int64_t ultimo_streaming_us = 0;
 
 // ─── FILTRO DIGITAL DE DOBLE ETAPA (INA3221) ─────────────────────────────────
 // Estructura para el procesamiento y estabilización de telemetría de potencia.
@@ -580,10 +593,10 @@ static void tarea_principal(void *arg) {
       }
     }
 
-    // 3. TELEMETRÍA MULTINIVEL (4Hz / 1Hz)
+    // 3. TELEMETRÍA MULTINIVEL (2Hz / 1Hz)
     if (mqtt_conectado) {
-      if (ahora_us - ultimo_pub_rapido >= 250000LL) {
-        Publicar_Estado_Rapido_MQTT(); // Se dispara a ~4Hz (250ms)
+      if (ahora_us - ultimo_pub_rapido >= 500000LL) {
+        Publicar_Estado_Rapido_MQTT(); // Bajado a 2Hz (500ms) para estabilidad
         ultimo_pub_rapido = ahora_us;
       }
 
@@ -593,12 +606,20 @@ static void tarea_principal(void *arg) {
         ticks_sin_gps = 0; // Heartbeat
       }
 
-      // Despacho de captura de calibración (Una sola vez cuando esté listo)
-      if (batch_count >= BATCH_SIZE) { // Check if batch is full
-        Publicar_Batch_Potencia_MQTT();
-        batch_count = 0; // Reset batch count after publishing
-        last_batch_p1 = -100.0f; // Reset last power for new batch
-        ESP_LOGI(TAG, "Debug: Reporte de batch de potencia enviado exitosamente.");
+      // 4. MOTOR DE STREAMING (ENVÍO SEGMENTADO DE LOTES)
+      // Si el lote llegó a la meta, activamos el modo de envío por ráfagas
+      if (batch_count >= BATCH_GOAL && !streaming_activo) {
+        streaming_activo = true;
+        streaming_indice = 0;
+        streaming_parte = 0;
+        ultimo_streaming_us = ahora_us;
+        ESP_LOGI(TAG, "Lote de %d completo. Iniciando streaming...", BATCH_GOAL);
+      }
+
+      // Procesa el envío de una ráfaga cada 500ms para no ahogar el WiFi
+      if (streaming_activo && (ahora_us - ultimo_streaming_us >= 500000LL)) {
+        Publicar_Batch_Potencia_MQTT(); // Envía el siguiente fragmento
+        ultimo_streaming_us = ahora_us;
       }
     } else {
       // Si no hay MQTT, el heartbeat se mide en ciclos de 100ms (50 = 5s)
@@ -737,8 +758,8 @@ static void tarea_medicion_ina(void *arg) {
     ina_actualizar_promedio(&prom_ch1, v1, i1, ch1_ok);
     ina_actualizar_promedio(&prom_ch2, v2, i2, ch2_ok);
 
-    // Captura por barrido (40mW delta) para calibración (BATCH 256)
-    if (ch1_ok && ch2_ok && batch_count < BATCH_SIZE) {
+    // Captura por barrido (40mW delta) para calibración (SOLO SI NO ESTÁ ENVIANDO)
+    if (ch1_ok && ch2_ok && !streaming_activo && batch_count < BATCH_MAX) {
         float p1_ahora = v1 * i1 * 1000.0f;
         float p2_ahora = v2 * i2 * 1000.0f;
         
@@ -748,11 +769,6 @@ static void tarea_medicion_ina(void *arg) {
             batch_ch2[batch_count] = p2_ahora;
             last_batch_p1 = p1_ahora;
             batch_count++;
-            
-            if (batch_count == BATCH_SIZE) {
-                ESP_LOGI("INA", "Batch de potencia lleno. Enviando...");
-                // Podríamos disparar el envío automático aquí si se desea
-            }
         }
     }
   }
@@ -1428,32 +1444,45 @@ static void Publicar_Estado_Lento_MQTT(void) {
   esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC_PUB_SLOW, json, 0, 0, 0);
 }
 
-// ─── FUNCIÓN BATCH: ENVÍO DE DATOS DE POTENCIA ACUMULADOS ────────────────────
+// ─── FUNCIÓN BATCH: ENVÍO DE DATOS FRAGMENTADO (STREAMING) ──────────────────
 static void Publicar_Batch_Potencia_MQTT(void) {
-    if (!mqtt_client || batch_count == 0) return;
-    
-    // Alarma dinámica: 256 pares + cabeceras (aprox 5-6KB)
-    // Usamos heap para no saturar stack
-    char *json_buff = malloc(6144); 
+    if (!mqtt_client || !streaming_activo) return;
+
+    size_t buf_size = 1024; // Buffer pequeño y seguro (1KB) para fragmentos
+    char *json_buff = malloc(buf_size);
     if (!json_buff) return;
 
-    int pos = snprintf(json_buff, 6144, "{\"batch\":%d,\"data\":\"P1(mW),P2(mW)\\n", batch_count);
-    
-    for (int i = 0; i < batch_count; i++) {
-        int written = snprintf(json_buff + pos, 6144 - pos, "%.2f,%.2f\\n", batch_ch1[i], batch_ch2[i]);
-        if (written > 0) pos += written;
-        if (pos >= 6100) break; // Límite de seguridad
+    // Calcular cuántos enviar en este fragmento
+    int restante = batch_count - streaming_indice;
+    int a_enviar = (restante > CHUNK_SIZE) ? CHUNK_SIZE : restante;
+    bool es_ultimo = (streaming_indice + a_enviar >= batch_count);
+
+    int pos = snprintf(json_buff, buf_size, 
+              "{\"id\":%d,\"part\":%d,\"last\":%s,\"data\":\"", 
+              batch_id, streaming_parte, es_ultimo ? "true" : "false");
+
+    for (int i = 0; i < a_enviar; i++) {
+        int idx = streaming_indice + i;
+        int written = snprintf(json_buff + pos, buf_size - pos, "%.2f,%.2f\\n", batch_ch1[idx], batch_ch2[idx]);
+        if (written > 0 && written < (buf_size - pos)) pos += written;
     }
-    
-    snprintf(json_buff + pos, 6144 - pos, "\"}");
-    
-    // Enviamos a un tópico específico para lotes
-    esp_mqtt_client_publish(mqtt_client, "solar/data/batch", json_buff, 0, 1, 0);
+
+    snprintf(json_buff + pos, buf_size - pos, "\"}");
+
+    esp_mqtt_client_publish(mqtt_client, "solar/data/batch", json_buff, 0, 0, 0);
     free(json_buff);
-    
-    // Opcionalmente podemos resetear el contador tras envío
-    // batch_count = 0; 
-    // last_batch_p1 = -100.0f;
+
+    // Actualizar punteros de streaming
+    streaming_indice += a_enviar;
+    streaming_parte++;
+
+    if (es_ultimo) {
+        ESP_LOGI(TAG, "Streaming de lote %d finalizado (%d partes).", batch_id, streaming_parte);
+        streaming_activo = false;
+        batch_count = 0;    // Resetear para capturar el siguiente lote cíclico
+        batch_id++;         // Incrementar ID para el ciclo que viene
+        last_batch_p1 = -100.0f;
+    }
 }
 
 // ─── ESTRATEGIA DE PERSISTENCIA NVS (PROTECCIÓN DE FLASH) ────────────────────

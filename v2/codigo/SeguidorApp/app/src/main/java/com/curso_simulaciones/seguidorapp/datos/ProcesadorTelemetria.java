@@ -158,23 +158,39 @@ public class ProcesadorTelemetria {
     private void guardarBatchTxt(String jsonStr, Context context) {
         try {
             JSONObject obj = new JSONObject(jsonStr);
+            int batchId = obj.optInt("id", 0);
+            int part = obj.optInt("part", 0);
+            boolean isLast = obj.optBoolean("last", false);
             String content = obj.optString("data", "");
             
-            // Guardamos en la carpeta de archivos del sistema
+            // Usamos un nombre de archivo basado en el ID del lote
+            // Esto garantiza que todas las partes (part 0, 1, 2...) se escriban en el mismo archivo
             File folder = context.getExternalFilesDir(null);
-            String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
-            File file = new File(folder, "batch_potencia_" + timeStamp + ".txt");
+            File file = new File(folder, "LOTE_ID_" + batchId + ".txt");
             
-            FileOutputStream out = new FileOutputStream(file);
+            // Abrimos en modo APPEND (true)
+            FileOutputStream out = new FileOutputStream(file, true);
+            
+            // Si es la primera parte, podemos poner una cabecera opcional
+            if (part == 0) {
+                String header = "# LOTE ID: " + batchId + " | Iniciado: " + new Date().toString() + "\n";
+                header += "P1(mW),P2(mW)\n";
+                out.write(header.getBytes());
+            }
+
             out.write(content.getBytes());
             out.close();
             
-            AlmacenDatosRAM.conectado_PubSub = "Archivo guardado: " + file.getName();
-            android.util.Log.i("TELEMETRIA", "Lote guardado en: " + file.getAbsolutePath());
+            if (isLast) {
+                AlmacenDatosRAM.conectado_PubSub = "¡LOTE " + batchId + " COMPLETO!";
+                android.util.Log.i("TELEMETRIA", "Lote finalizado en: " + file.getAbsolutePath());
+            } else {
+                AlmacenDatosRAM.conectado_PubSub = "Recibiendo lote " + batchId + " (Parte " + part + ")...";
+            }
             
         } catch (Exception e) {
             e.printStackTrace();
-            AlmacenDatosRAM.conectado_PubSub = "Error al guardar lote .txt";
+            AlmacenDatosRAM.conectado_PubSub = "Error al procesar fragmento de lote";
         }
     }
 }
