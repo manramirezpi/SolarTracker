@@ -742,8 +742,8 @@ static void tarea_medicion_ina(void *arg) {
         float p1_ahora = v1 * i1 * 1000.0f;
         float p2_ahora = v2 * i2 * 1000.0f;
         
-        // Filtro: Diferencia absoluta > 40 mW respecto al último punto guardado
-        if (fabsf(p1_ahora - last_batch_p1) >= 40.0f) {
+        // Filtro: Diferencia absoluta > 25 mW respecto al último punto guardado
+        if (fabsf(p1_ahora - last_batch_p1) >= 25.0f) {
             batch_ch1[batch_count] = p1_ahora;
             batch_ch2[batch_count] = p2_ahora;
             last_batch_p1 = p1_ahora;
