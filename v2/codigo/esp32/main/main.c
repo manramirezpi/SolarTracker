@@ -35,9 +35,6 @@ static const char *TAG = "SOLAR";
 // ═══════════════════════════════════════════════════════════════════════════
 // CONFIGURACIÓN WiFi y MQTT — Modifique solo esta sección
 // ═══════════════════════════════════════════════════════════════════════════
-// #define WIFI_SSID "3210NX"
-// #define WIFI_PASSWORD "71671878"
-
 //#define WIFI_SSID "3210NX"
 //#define WIFI_PASSWORD "71671878"
 
