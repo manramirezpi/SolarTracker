@@ -58,7 +58,7 @@ static const char *TAG = "SOLAR";
 #define MQTT_PASSWORD "iotfisica"
 #define MQTT_TOPIC_PUB_FAST "solar/status/fast" // 10Hz: Ángulos y Potencia Instantánea
 #define MQTT_TOPIC_PUB_SLOW "solar/status/slow" // 1Hz: GPS, Hora, Promedios e Info
-#define MQTT_TOPIC_SUB "solar/sub"              // ESP32 escucha comandos aquí
+#define MQTT_TOPIC_SUB "solar/cmd"              // ESP32 escucha comandos aquí
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ─── Pines INA3221 ───────────────────────────────────────────────────────────

@@ -68,7 +68,7 @@ lógica de comunicaciones ni el procesamiento de datos.
 
 | Tópico | Contenido |
 |---|---|
-| `solar/sub` | Coordenadas manuales, fecha estática, comandos de modo |
+| `solar/cmd` | Coordenadas manuales, fecha estática, comandos de modo |
 
 ---
 
