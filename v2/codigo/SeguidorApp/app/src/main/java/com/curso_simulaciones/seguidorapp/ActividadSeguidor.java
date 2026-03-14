@@ -15,6 +15,14 @@ import com.curso_simulaciones.seguidorapp.utilidades.GeneradorUI;
 
 import org.json.JSONException;
 import org.json.JSONObject;
+import android.content.Intent;
+import android.net.Uri;
+import androidx.core.content.FileProvider;
+import android.app.AlertDialog;
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * Controlador principal de la aplicación SeguidorApp (Capa "Controlador" en el patrón MVC/MVP).
@@ -178,6 +186,45 @@ public class ActividadSeguidor extends Activity implements Runnable {
                 AlmacenDatosRAM.conectado_PubSub = "Solicitando Snapshot...";
             }
         });
+
+        ui.botonShare.setOnClickListener(v -> compartirArchivos());
+    }
+
+    private void compartirArchivos() {
+        File folder = getExternalFilesDir(null);
+        if (folder == null) return;
+        
+        File[] files = folder.listFiles((dir, name) -> name.endsWith(".txt") && !name.startsWith("RECEP_"));
+        if (files == null || files.length == 0) {
+            AlmacenDatosRAM.conectado_PubSub = "No hay archivos para compartir";
+            return;
+        }
+
+        // Ordenar por fecha (más reciente primero)
+        List<File> fileList = new ArrayList<>();
+        Collections.addAll(fileList, files);
+        Collections.sort(fileList, (f1, f2) -> Long.compare(f2.lastModified(), f1.lastModified()));
+
+        String[] names = new String[fileList.size()];
+        for (int i = 0; i < fileList.size(); i++) {
+            names[i] = fileList.get(i).getName();
+        }
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Seleccione archivo para enviar");
+        builder.setItems(names, (dialog, which) -> {
+            File fileToShare = fileList.get(which);
+            Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", fileToShare);
+
+            Intent intent = new Intent(Intent.ACTION_SEND);
+            intent.setType("text/plain");
+            intent.putExtra(Intent.EXTRA_SUBJECT, "Datos SolarTracker: " + fileToShare.getName());
+            intent.putExtra(Intent.EXTRA_STREAM, uri);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+            startActivity(Intent.createChooser(intent, "Enviar datos vía..."));
+        });
+        builder.show();
     }
 
     private void sincronizarControles() {
