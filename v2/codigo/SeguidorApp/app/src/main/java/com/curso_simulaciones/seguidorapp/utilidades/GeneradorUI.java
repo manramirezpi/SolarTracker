@@ -3,6 +3,8 @@ package com.curso_simulaciones.seguidorapp.utilidades;
 import android.app.Activity;
 import android.graphics.Color;
 import android.graphics.PorterDuff;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -17,8 +19,7 @@ import com.curso_simulaciones.seguidorapp.datos.AlmacenDatosRAM;
  * Clase encargada de empaquetar, instancias y manipular la interfaz gráfica (UI).
  * Representa la Capa "Vista" en el patrón MVC/MVP.
  *
- * Expone variables públicas de sus componentes (TextView, SeekBar, Gauge) para 
- * que el controlador pueda suscribirse a los eventos y enviar actualizaciones de datos.
+ * v2.1: Diseño Industrial, Tema Claro, Tablas Consolidadas y Dashboard de Salud.
  */
 public class GeneradorUI {
 
@@ -33,14 +34,18 @@ public class GeneradorUI {
     public Button btnAuto, btnMan;
     public TextView iconHealthMqtt, iconHealthGps, iconHealthIna, iconHealthLog;
 
-    public final int COLOR_FONDO = Color.parseColor("#F2F2F7");
+    // --- PALETA DE COLORES v2.1 (TEMA CLARO INDUSTRIAL) ---
+    public final int COLOR_FONDO = Color.parseColor("#F2F2F7"); // Gris claro iOS style
     public final int COLOR_CARD = Color.WHITE;
-    public final int COLOR_ACCENT = Color.parseColor("#007AFF");
-    public final int COLOR_TEXTO_PRI = Color.parseColor("#1C1C1E");
-    public final int COLOR_TEXTO_SEC = Color.parseColor("#8E8E93");
+    public final int COLOR_ACCENT = Color.parseColor("#007AFF"); // Azul sistema
+    public final int COLOR_TEXTO_PRI = Color.parseColor("#1C1C1E"); // Casi negro
+    public final int COLOR_TEXTO_SEC = Color.parseColor("#8E8E93"); // Gris medio
     public final int COLOR_ERROR = Color.parseColor("#FF3B30");
     public final int COLOR_OK = Color.parseColor("#34C759");
     public final int COLOR_WARN = Color.parseColor("#FFCC00");
+    public final int COLOR_BORDE = Color.parseColor("#E5E5EA");
+
+    public SeekBar sliderLat, sliderLon, sliderManualAz, sliderManualEl;
 
     public GeneradorUI(Activity actividad) {
         this.actividad = actividad;
@@ -56,49 +61,56 @@ public class GeneradorUI {
     }
 
     private void crearElementosGUI() {
-        // --- Tabla de Tracking ---
+        // --- Datos de Tracking ---
         solAz = configDato("--"); solEl = configDato("--");
         servoAz = configDato("--"); servoEl = configDato("--");
         errAz = configDato("--"); errEl = configDato("--");
 
-        // --- Tabla de Potencia ---
+        // --- Datos de Potencia ---
         p1Inst = configDato("--"); p1Avg = configDato("--"); p1Daily = configDato("--");
         p2Inst = configDato("--"); p2Avg = configDato("--"); p2Daily = configDato("--");
         labelGanancia = configDato("--");
         labelGanancia.setTextColor(COLOR_ACCENT);
 
+        // --- Controles de Ubicación ---
         sliderLat = configSeekBar(0, 18000, 9000);
         sliderLon = configSeekBar(0, 36000, 18000);
         labelLat = configLabel("Latitud: 0.00°");
         labelLon = configLabel("Longitud: 0.00°");
 
+        // --- Controles Manuales ---
         sliderManualAz = configSeekBar(0, 180, 90); 
         sliderManualEl = configSeekBar(0, 180, 90);
         labelManualAz = configLabel("Azimut: 0°"); 
         labelManualEl = configLabel("Elevación: 90°");
 
-        sliderTiempo = new CircularSlider(actividad);
-        sliderTiempo.setRange(1.0f, 1440.0f);
-        sliderTiempo.setValue(1.0f);
-        sliderTiempo.setLabel("Simulación");
-
+        // --- Selectores de Modo ---
         btnAuto = configBotonTab("AUTO", true);
         btnMan = configBotonTab("MANUAL", false);
 
+        // --- Botones de Acción ---
         botonConectar = new Button(actividad);
         botonConectar.setText("CONECTAR");
         botonConectar.setTextColor(Color.WHITE);
+        botonConectar.setAllCaps(false);
+        botonConectar.setTypeface(Typeface.SANS_SERIF, Typeface.BOLD);
         botonConectar.getBackground().setColorFilter(COLOR_ACCENT, PorterDuff.Mode.MULTIPLY);
 
         botonResetGPS = new Button(actividad);
-        botonResetGPS.setText("SYNC");
-        botonResetGPS.setTextColor(COLOR_ERROR);
+        botonResetGPS.setText("Sincronizar GPS");
+        botonResetGPS.setAllCaps(false);
+        botonResetGPS.setTextSize(12);
+        botonResetGPS.setTextColor(COLOR_ACCENT);
 
         botonTemp = new Button(actividad);
-        botonTemp.setText("DATA LOG");
+        botonTemp.setText("Descargar Datos");
+        botonTemp.setAllCaps(false);
+        botonTemp.setTextSize(12);
 
         botonShare = new Button(actividad);
-        botonShare.setText("EMAIL");
+        botonShare.setText("Compartir");
+        botonShare.setAllCaps(false);
+        botonShare.setTextSize(12);
 
         textviewAviso = new TextView(actividad);
         textviewAviso.setTextColor(COLOR_TEXTO_SEC);
@@ -112,23 +124,24 @@ public class GeneradorUI {
         iconHealthMqtt = configHealthIcon("MQTT");
         iconHealthGps = configHealthIcon("GPS");
         iconHealthIna = configHealthIcon("INA");
-        iconHealthLog = configHealthIcon("LOG");
+        iconHealthLog = configHealthIcon("DISK");
     }
 
     private TextView configHealthIcon(String name) {
         TextView tv = new TextView(actividad);
         tv.setText(name);
-        tv.setTextSize(8);
+        tv.setTextSize(9);
+        tv.setTypeface(null, Typeface.BOLD);
         tv.setTextColor(Color.WHITE);
-        tv.setPadding(dp(6), dp(2), dp(6), dp(2));
+        tv.setPadding(dp(8), dp(3), dp(8), dp(3));
         tv.setGravity(Gravity.CENTER);
-        actualizarEstadoIcono(tv, 0); // Por defecto: Desconectado
+        actualizarEstadoIcono(tv, 0); 
         return tv;
     }
 
     public void actualizarEstadoIcono(TextView tv, int state) {
-        android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
-        gd.setCornerRadius(dp(4));
+        GradientDrawable gd = new GradientDrawable();
+        gd.setCornerRadius(dp(6));
         int color = (state == 2) ? COLOR_OK : (state == 1 ? COLOR_WARN : COLOR_ERROR);
         gd.setColor(color);
         tv.setBackground(gd);
@@ -139,7 +152,7 @@ public class GeneradorUI {
         tv.setText(t);
         tv.setTextColor(COLOR_TEXTO_PRI);
         tv.setTextSize(15);
-        tv.setTypeface(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD);
+        tv.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
         tv.setGravity(Gravity.CENTER);
         return tv;
     }
@@ -147,7 +160,9 @@ public class GeneradorUI {
     private Button configBotonTab(String text, boolean active) {
         Button b = new Button(actividad);
         b.setText(text);
-        b.setTextSize(11);
+        b.setAllCaps(false);
+        b.setTextSize(12);
+        b.setTypeface(Typeface.SANS_SERIF, Typeface.BOLD);
         b.setTextColor(active ? Color.WHITE : COLOR_TEXTO_SEC);
         b.getBackground().setColorFilter(active ? COLOR_ACCENT : Color.LTGRAY, PorterDuff.Mode.MULTIPLY);
         return b;
@@ -162,7 +177,6 @@ public class GeneradorUI {
             sb.setMax(max - min);
         }
         sb.setProgress(progress);
-        
         sb.getProgressDrawable().setColorFilter(COLOR_ACCENT, PorterDuff.Mode.SRC_IN);
         sb.getThumb().setColorFilter(COLOR_ACCENT, PorterDuff.Mode.SRC_IN);
         return sb;
@@ -173,12 +187,15 @@ public class GeneradorUI {
         tv.setText(text);
         tv.setTextColor(COLOR_TEXTO_SEC);
         tv.setTextSize(13);
-        tv.setPadding(0, 5, 0, 0);
-        return tv;    private LinearLayout crearGUI() {
+        tv.setPadding(0, dp(5), 0, 0);
+        return tv;
+    }
+
+    private LinearLayout crearGUI() {
         LinearLayout main = new LinearLayout(actividad);
         main.setOrientation(LinearLayout.VERTICAL);
         main.setBackgroundColor(COLOR_FONDO);
-        main.setPadding(dp(15), dp(10), dp(15), dp(10));
+        main.setPadding(dp(20), dp(15), dp(20), dp(15));
 
         // --- HEADER CON HEALTH MONITOR ---
         LinearLayout header = new LinearLayout(actividad);
@@ -186,43 +203,43 @@ public class GeneradorUI {
         
         TextView title = new TextView(actividad);
         title.setText("SolarTracker v2.1");
-        title.setTextSize(18);
-        title.setTypeface(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD);
+        title.setTextSize(20);
+        title.setTypeface(Typeface.SANS_SERIF, Typeface.BOLD);
         title.setTextColor(COLOR_TEXTO_PRI);
         
         header.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
         
         LinearLayout healthBox = new LinearLayout(actividad);
         healthBox.addView(iconHealthMqtt);
-        healthBox.addView(gapH(4));
+        healthBox.addView(gapH(6));
         healthBox.addView(iconHealthGps);
-        healthBox.addView(gapH(4));
+        healthBox.addView(gapH(6));
         healthBox.addView(iconHealthIna);
-        healthBox.addView(gapH(4));
+        healthBox.addView(gapH(6));
         healthBox.addView(iconHealthLog);
         header.addView(healthBox);
 
         main.addView(header);
+        main.addView(gapV(20));
+
+        // --- SECCIÓN 1: POSICIÓN (TRACKING) ---
+        main.addView(crearCard(crearTablaTracking()));
         main.addView(gapV(15));
 
-        // --- SECCIÓN 1: TRACKING ---
-        main.addView(crearCard(crearTablaTracking()));
-        main.addView(gapV(12));
-
-        // --- SECCIÓN 2: ENERGÍA ---
+        // --- SECCIÓN 2: BALANCE ENERGÉTICO ---
         main.addView(crearCard(crearTablaPotencia()));
-        main.addView(gapV(12));
+        main.addView(gapV(15));
 
-        // --- SECCIÓN 3: CONTROLES ---
+        // --- SECCIÓN 3: PANELES DE CONTROL (UBICACIÓN Y MANUAL) ---
         LinearLayout rowCtrl = new LinearLayout(actividad);
-        rowCtrl.addView(crearCard(crearPanelUbicacion()), new LinearLayout.LayoutParams(0, -1, 1));
-        rowCtrl.addView(gapH(10));
-        rowCtrl.addView(crearCard(crearPanelManual()), new LinearLayout.LayoutParams(0, -1, 1));
+        rowCtrl.addView(crearCard(crearPanelUbicacion()), new LinearLayout.LayoutParams(0, -2, 1));
+        rowCtrl.addView(gapH(12));
+        rowCtrl.addView(crearCard(crearPanelManual()), new LinearLayout.LayoutParams(0, -2, 1));
         
-        main.addView(rowCtrl, new LinearLayout.LayoutParams(-1, 0, 1));
-        main.addView(gapV(12));
+        main.addView(rowCtrl);
+        main.addView(gapV(20));
 
-        // --- FOOTER ---
+        // --- FOOTER: FECHA, ESTADO Y ACCIONES ---
         LinearLayout footer = new LinearLayout(actividad);
         footer.setGravity(Gravity.CENTER_VERTICAL);
         
@@ -232,6 +249,7 @@ public class GeneradorUI {
         footerInfo.addView(textviewAviso);
         
         footer.addView(footerInfo, new LinearLayout.LayoutParams(0, -2, 1));
+        
         footer.addView(botonShare);
         footer.addView(botonTemp);
         footer.addView(botonConectar);
@@ -245,7 +263,7 @@ public class GeneradorUI {
         LinearLayout card = new LinearLayout(actividad);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setBackground(crearFondoCard());
-        card.setPadding(dp(15), dp(15), dp(15), dp(15));
+        card.setPadding(dp(16), dp(16), dp(16), dp(16));
         card.addView(view);
         return card;
     }
@@ -270,8 +288,8 @@ public class GeneradorUI {
     private LinearLayout crearTablaTracking() {
         LinearLayout l = new LinearLayout(actividad);
         l.setOrientation(LinearLayout.VERTICAL);
-        l.addView(crearFila("SEGUIMIENTO", "Sol", "Servo", "Error", true));
-        l.addView(gapV(5));
+        l.addView(crearFila("POSICIÓN", "Solar", "Servo", "Error", true));
+        l.addView(gapV(8));
         l.addView(crearFila("Azimut", solAz, servoAz, errAz));
         l.addView(crearFila("Elevación", solEl, servoEl, errEl));
         return l;
@@ -280,17 +298,22 @@ public class GeneradorUI {
     private LinearLayout crearTablaPotencia() {
         LinearLayout l = new LinearLayout(actividad);
         l.setOrientation(LinearLayout.VERTICAL);
-        l.addView(crearFila("POTENCIA", "Seguidor", "Estático", "", true));
-        l.addView(gapV(5));
-        l.addView(crearFila("Inst.(mW)", p1Inst, p2Inst, null));
-        l.addView(crearFila("Med.(mW)", p1Avg, p2Avg, null));
-        l.addView(crearFila("E.(mWh)", p1Daily, p2Daily, null));
+        l.addView(crearFila("POTENCIA", "Tracker", "Estático", "", true));
+        l.addView(gapV(8));
+        l.addView(crearFila("Instantánea", p1Inst, p2Inst, null));
+        l.addView(crearFila("Promedio", p1Avg, p2Avg, null));
+        l.addView(crearFila("Diaria (mWh)", p1Daily, p2Daily, null));
         
         LinearLayout gainBox = new LinearLayout(actividad);
-        gainBox.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
-        TextView t = new TextView(actividad); t.setText("Ganancia: "); t.setTextColor(COLOR_TEXTO_SEC);
+        gainBox.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        TextView t = new TextView(actividad); 
+        t.setText("Ganancia Neta: "); 
+        t.setTextColor(COLOR_TEXTO_SEC);
+        t.setTextSize(14);
         gainBox.addView(t);
+        labelGanancia.setTextSize(16);
         gainBox.addView(labelGanancia);
+        l.addView(gapV(8));
         l.addView(gainBox);
         return l;
     }
@@ -302,21 +325,22 @@ public class GeneradorUI {
         TextView tLabel = new TextView(actividad);
         tLabel.setText(label);
         tLabel.setTextColor(title ? COLOR_ACCENT : COLOR_TEXTO_SEC);
-        tLabel.setTextSize(title ? 11 : 13);
-        if (title) tLabel.setTypeface(null, android.graphics.Typeface.BOLD);
+        tLabel.setTextSize(title ? 12 : 14);
+        if (title) tLabel.setTypeface(null, Typeface.BOLD);
         r.addView(tLabel, new LinearLayout.LayoutParams(0, -2, 4));
 
         Object[] cols = {c1, c2, c3};
         for (Object col : cols) {
             if (col == null) {
-                r.addView(new View(actividad), new LinearLayout.LayoutParams(0, 1, 2));
+                View space = new View(actividad);
+                r.addView(space, new LinearLayout.LayoutParams(0, 1, 2));
                 continue;
             }
             if (col instanceof String) {
                 TextView tv = new TextView(actividad);
                 tv.setText((String)col);
                 tv.setTextColor(COLOR_TEXTO_SEC);
-                tv.setTextSize(10);
+                tv.setTextSize(11);
                 tv.setGravity(Gravity.CENTER);
                 r.addView(tv, new LinearLayout.LayoutParams(0, -2, 2));
             } else {
@@ -329,12 +353,17 @@ public class GeneradorUI {
     private LinearLayout crearPanelUbicacion() {
         LinearLayout l = new LinearLayout(actividad);
         l.setOrientation(LinearLayout.VERTICAL);
+        TextView t = new TextView(actividad);
+        t.setText("UBICACIÓN");
+        t.setTextColor(COLOR_ACCENT);
+        t.setTextSize(11);
+        t.setTypeface(null, Typeface.BOLD);
+        l.addView(t);
+        l.addView(gapV(8));
         l.addView(labelLat);
         l.addView(sliderLat);
         l.addView(labelLon);
         l.addView(sliderLon);
-        l.addView(gapV(10));
-        l.addView(sliderTiempo);
         return l;
     }
 
@@ -343,11 +372,11 @@ public class GeneradorUI {
         l.setOrientation(LinearLayout.VERTICAL);
         
         LinearLayout toggle = new LinearLayout(actividad);
-        toggle.addView(btnAuto, new LinearLayout.LayoutParams(0, dp(32), 1));
-        toggle.addView(btnMan, new LinearLayout.LayoutParams(0, dp(32), 1));
+        toggle.addView(btnAuto, new LinearLayout.LayoutParams(0, dp(34), 1));
+        toggle.addView(btnMan, new LinearLayout.LayoutParams(0, dp(34), 1));
         l.addView(toggle);
         
-        l.addView(gapV(8));
+        l.addView(gapV(10));
         l.addView(labelManualAz);
         l.addView(sliderManualAz);
         l.addView(labelManualEl);
@@ -356,74 +385,11 @@ public class GeneradorUI {
         return l;
     }
 
-    private android.graphics.drawable.GradientDrawable crearFondoCard() {
-        android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
+    private GradientDrawable crearFondoCard() {
+        GradientDrawable gd = new GradientDrawable();
         gd.setColor(COLOR_CARD);
         gd.setCornerRadius(dp(12));
-        gd.setStroke(1, Color.parseColor("#E5E5EA"));
-        return gd;
-    }
-}
-in;
-    }
-
-    private LinearLayout crearItemInstrumento(String label, View gauge) {
-        LinearLayout l = new LinearLayout(actividad);
-        l.setOrientation(LinearLayout.VERTICAL);
-        l.setGravity(Gravity.CENTER);
-        l.setBackground(crearFondoCard());
-        l.setPadding(5, 5, 5, 5);
-        
-        TextView tv = new TextView(actividad);
-        tv.setText(label);
-        tv.setTextColor(COLOR_TEXTO_SEC);
-        tv.setTextSize(10);
-        l.addView(tv);
-        l.addView(gauge, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
-        params.setMargins(0, 5, 10, 5);
-        l.setLayoutParams(params);
-        return l;
-    }
-
-    private LinearLayout crearContenedorInstrumentos(String titulo, View g1, View g2) {
-        LinearLayout l = new LinearLayout(actividad);
-        l.setOrientation(LinearLayout.VERTICAL);
-        l.setPadding(10, 10, 10, 10);
-        l.setGravity(Gravity.CENTER);
-        l.setBackground(crearFondoCard());
-        
-        TextView tv = new TextView(actividad);
-        tv.setText(titulo);
-        tv.setTextColor(COLOR_TEXTO_SEC);
-        tv.setTextSize(12);
-        tv.setTypeface(null, android.graphics.Typeface.BOLD);
-        tv.setGravity(Gravity.CENTER);
-        l.addView(tv);
-        
-        LinearLayout col = new LinearLayout(actividad);
-        col.setOrientation(LinearLayout.VERTICAL);
-        col.addView(g1, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f));
-        col.addView(g2, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f));
-        l.addView(col, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f));
-        
-        return l;
-    }
-
-    private android.graphics.drawable.GradientDrawable crearFondoHeader() {
-        android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
-        gd.setColor(Color.rgb(30, 35, 45));
-        gd.setCornerRadius(0);
-        gd.setStroke(2, COLOR_ACCENT);
-        return gd;
-    }
-
-    private android.graphics.drawable.GradientDrawable crearFondoCard() {
-        android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
-        gd.setColor(COLOR_CARD);
-        gd.setCornerRadius(20);
-        gd.setStroke(2, Color.rgb(50, 55, 65));
+        gd.setStroke(dp(1), COLOR_BORDE);
         return gd;
     }
 }

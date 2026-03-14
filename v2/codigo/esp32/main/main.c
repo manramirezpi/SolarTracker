@@ -174,21 +174,16 @@ typedef struct {
   // --- Banderas de Selección (Flags de Estado) ---
   uint8_t usar_lat_manual; // 1: Ignora GPS, usa lat_manual
   uint8_t usar_lon_manual; // 1: Ignora GPS, usa lon_manual
-  uint8_t
-      simulacion_activa; // 1: Desacopla el tiempo real; usa factor_velocidad
   uint8_t usar_fecha_manual; // 1: Fija el cálculo en una fecha estática
                              // específica (dia_manual, mes_manual, anio_manual)
-  uint8_t servo_manual; // 1: Control directo de motores (modo independiente)
+  uint8_t servo_manual; // 1: Control directo de motores (modo manual)
 
-  // --- Valores de Configuración y Datos de Simulación ---
+  // --- Valores de Configuración ---
   double lat_manual;  // Coordenada forzada desde la App
   double lon_manual;  // Coordenada forzada desde la App
   uint8_t dia_manual; // Fecha forzada para pruebas
   uint8_t mes_manual;
   uint16_t anio_manual;
-  int factor_velocidad;       // Escala de tiempo (ej: 60 = 1min/seg)
-  LocalTime_t tiempo_interno; // Reloj de la simulación
-  int64_t ultimo_tick_us;     // Referencia para incremento de tiempo simulado
   float ser_az_manual;        // Ángulo físico objetivo para modo manual
   float ser_el_manual;        // Ángulo físico objetivo para modo manual
 } SystemControl_t;
@@ -200,9 +195,8 @@ SolarCalc_t gps_solar = {0};
 SolarCalc_t gps_solar_real = {0}; // posicion real del sol (siempre GPS)
 LocalTime_t tiempo_local = {0};
 
-SystemControl_t sys_ctrl = {.factor_velocidad = 1,
-                            .tiempo_interno = {0},
-                            .ultimo_tick_us = 0,
+SystemControl_t sys_ctrl = {.usar_lat_manual = 0,
+                            .usar_lon_manual = 0,
                             .usar_fecha_manual = 0,
                             .dia_manual = 0,
                             .mes_manual = 0,
@@ -563,19 +557,6 @@ static void tarea_principal(void *arg) {
         Procesar_Trama_GPRMC(trama);
         Procesar_Tiempo_GPS();
 
-        if (!sys_ctrl.simulacion_activa) {
-          Calcular_Hora_Local(&tiempo_local);
-        }
-
-        if (sys_ctrl.usar_fecha_manual) {
-          tiempo_local.dia = sys_ctrl.dia_manual;
-          tiempo_local.mes = sys_ctrl.mes_manual;
-          tiempo_local.ano = sys_ctrl.anio_manual;
-          gps_solar.utc_dia = sys_ctrl.dia_manual;
-          gps_solar.utc_mes = sys_ctrl.mes_manual;
-          gps_solar.utc_ano = sys_ctrl.anio_manual;
-        }
-
         if (mi_gps.es_valido) {
           Procesar_Ubicacion_GPS();
         }
@@ -601,11 +582,17 @@ static void tarea_principal(void *arg) {
     } else {
       Actualizar_Coordenadas_Calculo();
       Gestionar_Tiempo_Sistema();
+      
+      gps_solar.utc_ano = tiempo_local.ano;
+      gps_solar.utc_mes = tiempo_local.mes;
+      gps_solar.utc_dia = tiempo_local.dia;
+      gps_solar.utc_hora = tiempo_local.hora - (int)(round(gps_solar.longitud_deg / 15.0)); // Inverso burdo para cálculo
+      // En realidad Calcular_Posicion_Solar debería directamente usar tiempo local si se adapta,
+      // pero mantendremos la compatibilidad con el motor actual.
 
       bool tiene_ubicacion = (ultima_lat_valida != 0.0 || sys_ctrl.usar_lat_manual);
-      bool tiempo_sincronizado = (gps_solar.utc_ano >= 2024 || 
-                                 sys_ctrl.usar_fecha_manual || 
-                                 sys_ctrl.simulacion_activa);
+      bool tiempo_sincronizado = (tiempo_local.ano >= 2024 || 
+                                 sys_ctrl.usar_fecha_manual);
 
       if (en_modo_busqueda && tiene_ubicacion && tiempo_sincronizado) {
         en_modo_busqueda = false;
@@ -1319,97 +1306,29 @@ static void Actualizar_Coordenadas_Calculo(void) {
       sys_ctrl.usar_lon_manual ? sys_ctrl.lon_manual : ultima_lon_valida;
 }
 
-// ─── MOTOR DE ACELERACIÓN TEMPORAL (SIMULADOR) ──────────────────────────────
-// Suma una ráfaga de segundos a una estructura de tiempo y recalcula
-// automáticamente el calendario (acarreo de minutos, horas, días, etc.).
-static void Incrementar_Tiempo_Simulado(LocalTime_t *t, int segundos_a_sumar) {
-  t->seg += segundos_a_sumar;
-
-  // Acarreo de Segundos a Minutos
-  while (t->seg >= 60) {
-    t->seg -= 60;
-    t->min++;
-  }
-
-  // Acarreo de Minutos a Horas
-  while (t->min >= 60) {
-    t->min -= 60;
-    t->hora++;
-  }
-
-  // Acarreo de Horas a Días y Gestión de Calendario Perpetuo
-  while (t->hora >= 24) {
-    t->hora -= 24;
-    t->dia++;
-
-    // Obtener el límite de días del mes actual para el acarreo de mes
-    int dias_max = dias_por_mes[t->mes - 1];
-    // Inteligencia para Febrero en años bisiestos
-    if (t->mes == 2 && es_bisiesto(t->ano))
-      dias_max = 29;
-
-    // Si el día excede el límite del mes (ej: 32 de enero -> 1 de febrero)
-    if (t->dia > dias_max) {
-      t->dia = 1;
-      t->mes++;
-
-      // Acarreo de Mes a Año (Cierre de ciclo anual)
-      if (t->mes > 12) {
-        t->mes = 1;
-        t->ano++;
-      }
-    }
-  }
-}
-
 // ─── GESTOR DE RELOJ DEL SISTEMA (TICKER 1HZ) ────────────────────────────────
-// Esta función actúa como el director de tiempo del seguidor solar.
-// Decide si el sistema debe seguir el tiempo real del GPS o el simulado.
+// Esta función avanza el reloj interno en 1 segundo cada vez que se llama,
+// sirviendo como respaldo si se pierde la señal GPS temporalmente.
 static void Gestionar_Tiempo_Sistema(void) {
   int64_t tick_actual_us = esp_timer_get_time();
 
-  // TICKER DE 1 SEGUNDO (1,000,000 us)
-  // Garantiza que el tiempo solo avance una vez por segundo real
   if (tick_actual_us - sys_ctrl.ultimo_tick_us >= 1000000LL) {
     sys_ctrl.ultimo_tick_us = tick_actual_us;
-
-    // MODO NORMAL: Sincroniza el tiempo interno con el tiempo real de los
-    // satélites
-    if (!sys_ctrl.simulacion_activa) {
-      sys_ctrl.tiempo_interno = tiempo_local;
+    
+    // Avanzar reloj local 1 segundo
+    tiempo_local.seg++;
+    if (tiempo_local.seg >= 60) {
+        tiempo_local.seg = 0;
+        tiempo_local.min++;
+        if (tiempo_local.min >= 60) {
+            tiempo_local.min = 0;
+            tiempo_local.hora++;
+            if (tiempo_local.hora >= 24) {
+                tiempo_local.hora = 0;
+                // No avanzamos el día por software para evitar desincronización grave
+            }
+        }
     }
-    // MODO SIMULACIÓN: Dispara el motor de aceleración (Factor_Velocidad)
-    else {
-      Incrementar_Tiempo_Simulado(&sys_ctrl.tiempo_interno,
-                                  sys_ctrl.factor_velocidad);
-    }
-  }
-
-  // INYECCIÓN DE TIEMPO SIMULADO (SOBRESCRITURA)
-  // Si la simulación está activa, "engañamos" al sistema sobreescribiendo
-  // las variables de tiempo del sol para que procedan del simulador.
-  if (sys_ctrl.simulacion_activa) {
-    tiempo_local = sys_ctrl.tiempo_interno;
-
-    // Recalculo inverso de UTC para el motor de cálculo solar
-    // (A partir de la hora local simulada y la longitud, deducimos el UTC
-    // ficticio)
-    int zona = (int)(gps_solar.longitud_deg / 15.0);
-    int utc_h = sys_ctrl.tiempo_interno.hora - zona;
-
-    // Gestión de límites de 24h para el UTC ficticio
-    if (utc_h >= 24)
-      utc_h -= 24;
-    else if (utc_h < 0)
-      utc_h += 24;
-
-    // Actualizamos la estructura que alimenta a Calcular_Posicion_Solar
-    gps_solar.utc_hora = utc_h;
-    gps_solar.utc_min = tiempo_local.min;
-    gps_solar.utc_seg = tiempo_local.seg;
-    gps_solar.utc_dia = tiempo_local.dia;
-    gps_solar.utc_mes = tiempo_local.mes;
-    gps_solar.utc_ano = tiempo_local.ano;
   }
 }
 
@@ -1449,15 +1368,20 @@ static void Publicar_Estado_Lento_MQTT(void) {
   if (!mqtt_conectado)
     return;
 
+  size_t total = 0, used = 0;
+  if (g_datalog_state == DATALOG_OK) {
+      esp_spiffs_info(NULL, &total, &used);
+  }
+  int disk_usage = (total > 0) ? (used * 100 / total) : 0;
+
   char json[380]; // JSON optimizado para baja frecuencia (1Hz)
   snprintf(json, sizeof(json),
            "{"
            "\"hora\":\"%02d:%02d:%02d\","
            "\"fecha\":\"%02d/%02d/%04d\","
            "\"gps\":{\"lat\":%.5f,\"lon\":%.5f,\"val\":%s},"
-           "\"health\":{\"mqtt\":2,\"gps\":%d,\"ina\":%d,\"disk\":0},"
+           "\"health\":{\"mqtt\":2,\"gps\":%d,\"ina\":%d,\"disk\":%d},"
            "\"modo\":\"%s\","
-           "\"v_sim\":%d,"
            "\"parking\":%s"
            "}",
            tiempo_local.hora, tiempo_local.min, tiempo_local.seg,
@@ -1465,15 +1389,14 @@ static void Publicar_Estado_Lento_MQTT(void) {
            gps_solar_real.latitud_deg, gps_solar_real.longitud_deg,
            mi_gps.es_valido ? "true" : "false",
            mi_gps.es_valido ? 2 : 1,
-           (Almacen_Energia.p1_v > 0.1) ? 2 : 1,
-           sys_ctrl.simulacion_activa
-               ? "SIM"
-               : (sys_ctrl.servo_manual
-                      ? "SERVO"
-                      : (sys_ctrl.usar_lat_manual || sys_ctrl.usar_lon_manual
-                             ? "MANUAL"
-                             : "GPS")),
-           sys_ctrl.factor_velocidad, en_modo_parking ? "true" : "false");
+           (ina_ch1_v > 0.1) ? 2 : 1,
+           disk_usage,
+           (sys_ctrl.servo_manual
+                       ? "MAN"
+                       : (sys_ctrl.usar_lat_manual || sys_ctrl.usar_lon_manual
+                              ? "SET"
+                              : "AUTO")),
+           en_modo_parking ? "true" : "false");
 
   esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC_PUB_SLOW, json, 0, 0, 0);
 }
@@ -1642,15 +1565,31 @@ static void Procesar_Comando_MQTT(const char *datos, int len) {
   while (*cmd_ptr == ' ' || *cmd_ptr == '"')
     cmd_ptr++; // Limpiar espacios y comillas
 
-  // 2. COMANDO: RESET (RESTAURAR MODO GPS)
-  if (strncmp(cmd_ptr, "reset", 5) == 0) {
+  // 1. COMANDO: GET_TEMP (Trigger para descarga del Datalogger)
+  if (strncmp(cmd_ptr, "get_temp", 8) == 0) {
+      if (!g_descarga_en_curso) {
+          xTaskCreate(Datalogger_Tarea_Descarga, "descarga_task", 4096, NULL, 2, NULL);
+      }
+      streaming_manual_trigger = true; // También dispara snapshot de calibración
+  }
+  // 2. COMANDO: RESET (RESTAURAR MODO AUTO/GPS)
+  else if (strncmp(cmd_ptr, "reset", 5) == 0) {
     sys_ctrl.usar_lat_manual = 0;
     sys_ctrl.usar_lon_manual = 0;
-    sys_ctrl.simulacion_activa = 0;
-    sys_ctrl.factor_velocidad = 1;
     sys_ctrl.usar_fecha_manual = 0;
     sys_ctrl.servo_manual = 0;
-    
+    ESP_LOGI(TAG, "MQTT: Reset a modo AUTOMÁTICO");
+  }
+  // 3. COMANDO: SET_MAN (FORZAR MODO MANUAL)
+  else if (strncmp(cmd_ptr, "set_man", 7) == 0) {
+    sys_ctrl.servo_manual = 1;
+    sys_ctrl.ser_az_manual = pos_actual_az;
+    sys_ctrl.ser_el_manual = pos_actual_el;
+    pos_obj_az = pos_actual_az;
+    pos_obj_el = pos_actual_el;
+    servo_manual_anterior = true;
+    ESP_LOGI(TAG, "MQTT: Modo MANUAL activado por usuario");
+  }  
     // Recálculo INMEDIATO: Forzamos la actualización astronómica en el mismo ciclo de CPU
     // saltando la cola de la tarea principal.
     Actualizar_Coordenadas_Calculo();
@@ -1770,14 +1709,6 @@ static void Procesar_Comando_MQTT(const char *datos, int len) {
       servo_manual_anterior = true;
       ESP_LOGI(TAG, "MQTT: Servo EL manual = %.2f (Pivote forzado)", valor);
     }
-  }
-  // 6. COMANDOS BATCH (POTENCIA)
-  else if (strncmp(cmd_ptr, "get_batch", 9) == 0) {
-    // Legacy: No hace nada o dispara el motor gradual
-  }
-  else if (strncmp(cmd_ptr, "get_temp", 8) == 0) {
-    streaming_manual_trigger = true;
-    ESP_LOGI(TAG, "MQTT: Captura temporal (Snapshot) solicitada.");
   }
   else if (strncmp(cmd_ptr, "clear_batch", 11) == 0) {
     batch_count = 0;

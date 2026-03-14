@@ -93,16 +93,17 @@ public class ProcesadorTelemetria {
             }
 
             if (obj.has("modo")) {
-                String modoPrincipal = obj.getString("modo");
+                String modoPrincipal = obj.getString("modo"); // AUTO, MAN o SET
                 String parking = obj.optString("parking", "false");
                 if (parking.equalsIgnoreCase("true")) {
-                    AlmacenDatosRAM.modo = modoPrincipal + " (parking)";
+                    AlmacenDatosRAM.modo = "PARKING";
                 } else {
                     AlmacenDatosRAM.modo = modoPrincipal;
                 }
             }
 
-            AlmacenDatosRAM.factor_vel = (float) obj.optDouble("v_sim", AlmacenDatosRAM.factor_vel);
+            // AlmacenDatosRAM.factor_vel ya no se sincroniza en v2.1
+
 
             // Si es el primer dato que llega, avisamos para sincronizar sliders
             if (primeraVez && AlmacenDatosRAM.lat != 0) {

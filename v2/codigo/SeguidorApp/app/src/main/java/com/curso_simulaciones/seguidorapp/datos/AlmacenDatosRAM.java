@@ -46,9 +46,8 @@ public class AlmacenDatosRAM {
     public static volatile String fecha = "--/--/----";
     public static volatile String hora = "--:--:--";
 
-    // Modo y Factor de velocidad
-    public static volatile String modo = "GPS";
-    public static volatile float factor_vel = 1.0f;
+    // Modo (AUTO/MAN/SET)
+    public static volatile String modo = "AUTO";
 
     // Datos Potencia (Canal 1: Panel Móvil, Canal 2: Panel Fijo)
     public static volatile float p1_inst = 0, p1_avg = 0, p1_avg_dia = 0;

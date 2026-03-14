@@ -95,6 +95,7 @@ public class ActividadSeguidor extends Activity implements Runnable {
         });
 
         ui.btnMan.setOnClickListener(v -> {
+            publicarComando("set_man", 0, false);
             actualizarEstadoModo(false);
         });
 
@@ -157,12 +158,8 @@ public class ActividadSeguidor extends Activity implements Runnable {
             }
         });
 
-        ui.sliderTiempo.setOnValueChangeListener(value -> {
-            AlmacenDatosRAM.factor_vel = value;
-            // El tiempo suele ir ligado al GPS, pero lo tratamos como intervención GPS
-            intervencionGPS = true;
-            publicarComando("set_vel", value, true);
-        });
+        // ui.sliderTiempo ya no existe en v2.1
+
 
         // Eventos Manuales
         ui.sliderManualAz.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
@@ -218,7 +215,7 @@ public class ActividadSeguidor extends Activity implements Runnable {
         ui.botonTemp.setOnClickListener(v -> {
             if (AlmacenDatosRAM.conectado) {
                 publicarComando("get_temp", 0, false);
-                AlmacenDatosRAM.conectado_PubSub = "Solicitando Snapshot...";
+                AlmacenDatosRAM.conectado_PubSub = "Iniciando descarga de Datalogger...";
             }
         });
 
@@ -279,8 +276,7 @@ public class ActividadSeguidor extends Activity implements Runnable {
         ui.sliderManualAz.setProgress((int) AlmacenDatosRAM.servo_az + 90);
         ui.sliderManualEl.setProgress((int) AlmacenDatosRAM.servo_el);
 
-        // Resetear velocidad
-        ui.sliderTiempo.setValue(1.0f);
+        // Resetear velocidad (Simulación eliminada)
         actualizarEstadoModo(AlmacenDatosRAM.modo.equals("AUTO"));
     }
 
@@ -303,7 +299,7 @@ public class ActividadSeguidor extends Activity implements Runnable {
             obj.put("cmd", cmd);
             if (conValor) {
                 if (cmd.equals("set_vel")) {
-                    obj.put("factor", (int) valor);
+                    // Ignorado en v2.1
                 } else {
                     obj.put("valor", valor);
                 }
@@ -431,7 +427,6 @@ public class ActividadSeguidor extends Activity implements Runnable {
         if (!intervencionGPS && dt > MANUAL_LOCKOUT_MS) {
             ui.sliderLat.setProgress(Math.round(AlmacenDatosRAM.lat * 100 + 9000));
             ui.sliderLon.setProgress(Math.round(AlmacenDatosRAM.lon * 100 + 18000));
-            ui.sliderTiempo.setValue(AlmacenDatosRAM.factor_vel);
         }
 
         if (dt > MANUAL_LOCKOUT_MS) {
