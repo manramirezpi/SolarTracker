@@ -12,6 +12,28 @@ import com.curso_simulaciones.seguidorapp.datos.AlmacenDatosRAM;
 import com.curso_simulaciones.seguidorapp.datos.ProcesadorTelemetria;
 import com.curso_simulaciones.seguidorapp.utilidades.DialogoSalir;
 import com.curso_simulaciones.seguidorapp.utilidades.GeneradorUI;
+import com.google.android.material.snackbar.Snackbar;
+import com.google.android.material.bottomsheet.BottomSheetDialog;
+import android.widget.ProgressBar;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+import android.view.Gravity;
+import android.view.View;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.PorterDuff;
+import android.util.Log;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.io.FileOutputStream;
+import java.io.File;
+
+
+
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -59,6 +81,12 @@ public class ActividadSeguidor extends Activity implements Runnable {
     private static final long MANUAL_LOCKOUT_MS = 3000;
     private volatile boolean threadRunning = true; // Control del hilo
 
+    // Gestión de Feedback de Comandos
+    private HashMap<String, Long> lastCmdTime = new HashMap<>();
+    private HashMap<String, Float> lastTargetVal = new HashMap<>();
+    private static final long CMD_CONFIRM_TIMEOUT = 3000;
+    private static final long CMD_SENDING_UI_MS = 800;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -79,15 +107,21 @@ public class ActividadSeguidor extends Activity implements Runnable {
     private void eventos() {
         ui.botonConectar.setOnClickListener(v -> {
             if (!AlmacenDatosRAM.conectado) {
-                AlmacenDatosRAM.resetStats(); // Limpiar promedios previos para empezar fresco
+                AlmacenDatosRAM.resetStats(); 
                 cliente.conectar();
+                ui.botonConectar.setEnabled(false);
+                ui.botonConectar.setText("Conectando...");
             } else {
                 cliente.desconectar();
                 AlmacenDatosRAM.conectado = false;
-                AlmacenDatosRAM.conectado_PubSub = "Desconectado";
-                procesadorTelemetria.resetSync(); // Reset sync flag for next connection
+                AlmacenDatosRAM.conectado_PubSub = "DESCONECTADO";
+                procesadorTelemetria.resetSync();
+                actualizarUI();
             }
         });
+
+        ui.healthIndicator.setOnClickListener(v -> mostrarDiagnostico());
+        ui.healthStatusText.setOnClickListener(v -> mostrarDiagnostico());
 
         ui.btnAuto.setOnClickListener(v -> {
             publicarComando("reset", 0, false);
@@ -102,6 +136,7 @@ public class ActividadSeguidor extends Activity implements Runnable {
         ui.botonResetGPS.setOnClickListener(v -> {
             sincronizarControles();
             publicarComando("reset", 0, false);
+            Snackbar.make(findViewById(android.R.id.content), "GPS sincronizado ✓", Snackbar.LENGTH_SHORT).show();
         });
 
         ui.sliderLat.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
@@ -128,6 +163,7 @@ public class ActividadSeguidor extends Activity implements Runnable {
             public void onStopTrackingTouch(SeekBar seekBar) {
                 float lat = (seekBar.getProgress() - 9000) / 100f;
                 publicarComando("set_lat", lat, true);
+                registrarFeedback("lat", lat, ui.feedLat);
             }
         });
 
@@ -155,6 +191,7 @@ public class ActividadSeguidor extends Activity implements Runnable {
             public void onStopTrackingTouch(SeekBar seekBar) {
                 float lon = (seekBar.getProgress() - 18000) / 100f;
                 publicarComando("set_lon", lon, true);
+                registrarFeedback("lon", lon, ui.feedLon);
             }
         });
 
@@ -185,6 +222,7 @@ public class ActividadSeguidor extends Activity implements Runnable {
             public void onStopTrackingTouch(SeekBar seekBar) {
                 int valorReal = seekBar.getProgress() - 90;
                 publicarComando("set_ser_az", valorReal, true);
+                registrarFeedback("ser_az", (float)valorReal, ui.feedAz);
             }
         });
 
@@ -209,55 +247,195 @@ public class ActividadSeguidor extends Activity implements Runnable {
             @Override
             public void onStopTrackingTouch(SeekBar seekBar) {
                 publicarComando("set_ser_el", seekBar.getProgress(), true);
+                registrarFeedback("ser_el", (float)seekBar.getProgress(), ui.feedEl);
             }
         });
 
         ui.botonTemp.setOnClickListener(v -> {
             if (AlmacenDatosRAM.conectado) {
+                AlmacenDatosRAM.registrosDatalogger.clear();
+                ui.botonShare.setEnabled(false);
+                ui.progressDownload.setVisibility(View.VISIBLE);
+                ui.progressDownload.setProgress(0);
+                ui.labelDownloadCount.setVisibility(View.VISIBLE);
+                ui.labelDownloadCount.setText("Iniciando descarga...");
                 publicarComando("get_temp", 0, false);
-                AlmacenDatosRAM.conectado_PubSub = "Iniciando descarga de Datalogger...";
             }
         });
 
-        ui.botonShare.setOnClickListener(v -> compartirArchivos());
+        ui.botonShare.setOnClickListener(v -> generarYCompartirCSV());
     }
 
-    private void compartirArchivos() {
-        File folder = getExternalFilesDir(null);
-        if (folder == null)
-            return;
-
-        File[] files = folder.listFiles((dir, name) -> name.endsWith(".txt") && !name.startsWith("RECEP_"));
-        if (files == null || files.length == 0) {
-            AlmacenDatosRAM.conectado_PubSub = "No hay archivos para compartir";
+    private void generarYCompartirCSV() {
+        if (AlmacenDatosRAM.registrosDatalogger.isEmpty()) {
+            AlmacenDatosRAM.conectado_PubSub = "No hay registros acumulados";
             return;
         }
 
-        // Ordenar por fecha (más reciente primero)
-        List<File> fileList = new ArrayList<>();
-        Collections.addAll(fileList, files);
-        Collections.sort(fileList, (f1, f2) -> Long.compare(f2.lastModified(), f1.lastModified()));
+        try {
+            // Nombre del archivo basado en la fecha del sistema
+            String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
+            File cacheDir = getExternalCacheDir();
+            File file = new File(cacheDir, "SolarTracker_Export_" + timestamp + ".csv");
+            
+            FileOutputStream out = new FileOutputStream(file);
+            
+            // Cabecera con lat, lon y fecha (tomados de la RAM actual)
+            String header = "# lat=" + AlmacenDatosRAM.lat + ",lon=" + AlmacenDatosRAM.lon + 
+                           ",fecha=" + AlmacenDatosRAM.fecha + "\n";
+            header += "hora_utc,p1_mw,p2_mw\n";
+            out.write(header.getBytes());
 
-        String[] names = new String[fileList.size()];
-        for (int i = 0; i < fileList.size(); i++) {
-            names[i] = fileList.get(i).getName();
-        }
+            for (String registro : AlmacenDatosRAM.registrosDatalogger) {
+                out.write((registro + "\n").getBytes());
+            }
+            out.close();
 
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("Seleccione archivo para enviar");
-        builder.setItems(names, (dialog, which) -> {
-            File fileToShare = fileList.get(which);
-            Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", fileToShare);
-
+            Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", file);
             Intent intent = new Intent(Intent.ACTION_SEND);
-            intent.setType("text/plain");
-            intent.putExtra(Intent.EXTRA_SUBJECT, "Datos SolarTracker: " + fileToShare.getName());
+            intent.setType("text/csv");
+            intent.putExtra(Intent.EXTRA_SUBJECT, "Backup SolarTracker " + AlmacenDatosRAM.fecha);
             intent.putExtra(Intent.EXTRA_STREAM, uri);
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(intent, "Compartir CSV..."));
 
-            startActivity(Intent.createChooser(intent, "Enviar datos vía..."));
-        });
-        builder.show();
+        } catch (Exception e) {
+            Log.e("ActividadSeguidor", "Error al generar CSV", e);
+            AlmacenDatosRAM.conectado_PubSub = "Error exportación: " + e.getMessage();
+        }
+    }
+
+    private void finalizarDescarga() {
+        if (AlmacenDatosRAM.registrosDatalogger.isEmpty()) return;
+
+        ui.botonShare.setEnabled(true);
+        ui.progressDownload.setVisibility(View.GONE);
+        ui.labelDownloadCount.setVisibility(View.GONE);
+        
+        // Calcular resumen
+        int total = AlmacenDatosRAM.registrosDatalogger.size();
+        String hInicio = AlmacenDatosRAM.registrosDatalogger.get(0).split(",")[0];
+        String hFin = AlmacenDatosRAM.registrosDatalogger.get(total - 1).split(",")[0];
+        
+        float maxP1 = 0, maxP2 = 0;
+        for (String r : AlmacenDatosRAM.registrosDatalogger) {
+            String[] p = r.split(",");
+            maxP1 = Math.max(maxP1, Float.parseFloat(p[1]));
+            maxP2 = Math.max(maxP2, Float.parseFloat(p[2]));
+        }
+
+        String resumen = String.format(Locale.getDefault(), 
+            "Descarga completada: %d registros [%s - %s]. P1 max: %.0fmW, P2 max: %.0fmW",
+            total, hInicio, hFin, maxP1, maxP2);
+
+        Snackbar.make(findViewById(android.R.id.content), resumen, Snackbar.LENGTH_LONG).show();
+        AlmacenDatosRAM.conectado_PubSub = "Monitoreo activado";
+    }
+    private void registrarFeedback(String key, float target, TextView label) {
+        lastCmdTime.put(key, System.currentTimeMillis());
+        lastTargetVal.put(key, target);
+        label.setText("Enviando...");
+        label.setTextColor(Color.LTGRAY);
+        label.setVisibility(View.VISIBLE);
+    }
+
+    private void actualizarFeedback(String key, float currentVal, TextView label) {
+        if (!lastCmdTime.containsKey(key)) return;
+        
+        long elapsed = System.currentTimeMillis() - lastCmdTime.get(key);
+        float target = lastTargetVal.get(key);
+        
+        // Si el valor actual coincide con el objetivo (tolerancia 0.15)
+        if (Math.abs(currentVal - target) < 0.15f) {
+            label.setText("✓");
+            label.setTextColor(ui.COLOR_HEALTH_OK);
+            // Desaparecer después de 2 segundos
+            if (elapsed > 2000) label.setVisibility(View.GONE);
+        } else {
+            if (elapsed > CMD_CONFIRM_TIMEOUT) {
+                label.setText("Sin respuesta");
+                label.setTextColor(ui.COLOR_HEALTH_CRIT);
+            } else if (elapsed > CMD_SENDING_UI_MS) {
+                label.setText("Enviando...");
+                label.setTextColor(Color.GRAY);
+            }
+        }
+    }
+
+    private void mostrarDiagnostico() {
+        BottomSheetDialog dial = new BottomSheetDialog(this);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(60, 60, 60, 60);
+        
+        TextView title = new TextView(this);
+        title.setText("DIAGNÓSTICO DE SUBSISTEMAS");
+        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        title.setPadding(0, 0, 0, 30);
+        root.addView(title);
+
+        String[] nombres = {"BROKER MQTT", "SISTEMA GPS", "SENSOR INA", "RED WIFI", "SERVOMOTORES", "SPIFFS / DISK"};
+        int[] healths = {AlmacenDatosRAM.health_mqtt, AlmacenDatosRAM.health_gps, AlmacenDatosRAM.health_ina, 
+                        AlmacenDatosRAM.health_wifi, AlmacenDatosRAM.health_servos, AlmacenDatosRAM.health_disk};
+        long[] tss = {AlmacenDatosRAM.ts_mqtt, AlmacenDatosRAM.ts_gps, AlmacenDatosRAM.ts_ina, 
+                     AlmacenDatosRAM.ts_wifi, AlmacenDatosRAM.ts_servos, AlmacenDatosRAM.ts_disk};
+
+        for (int i = 0; i < nombres.length; i++) {
+            root.addView(crearFilaEstado(nombres[i], healths[i], tss[i]));
+        }
+
+        dial.setContentView(root);
+        dial.show();
+    }
+
+    private View crearFilaEstado(String nombre, int estado, long ts) {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        row.setPadding(0, 15, 0, 15);
+
+        long diff = (System.currentTimeMillis() - ts) / 1000;
+        boolean obsoleta = (ts == 0 || diff > 5);
+        
+        View circle = new View(this);
+        GradientDrawable gd = new GradientDrawable();
+        gd.setShape(GradientDrawable.OVAL);
+        
+        int color;
+        String statusText;
+        
+        if (obsoleta) {
+            color = Color.GRAY;
+            statusText = "Desconocido";
+        } else {
+            if (estado == 0) {
+                color = ui.COLOR_HEALTH_OK;
+                statusText = "Operando";
+            } else if (estado == 1) {
+                color = ui.COLOR_HEALTH_WARN;
+                statusText = "Degradado";
+            } else {
+                color = ui.COLOR_HEALTH_CRIT;
+                statusText = "Fallo";
+            }
+        }
+        
+        gd.setColor(color);
+        circle.setBackground(gd);
+        row.addView(circle, new LinearLayout.LayoutParams(dpToPx(14), dpToPx(14)));
+
+        TextView tv = new TextView(this);
+        String sAge = obsoleta ? "Sin datos" : "Hace " + diff + "s";
+        tv.setText(String.format("  %-12s | %-10s | %s", nombre, statusText, sAge));
+        tv.setTextSize(14);
+        tv.setTypeface(android.graphics.Typeface.MONOSPACE);
+        row.addView(tv);
+
+        return row;
+    }
+
+    private int dpToPx(int dp) {
+        float density = getResources().getDisplayMetrics().density;
+        return Math.round(dp * density);
     }
 
     private void sincronizarControles() {
@@ -282,15 +460,15 @@ public class ActividadSeguidor extends Activity implements Runnable {
 
     private void actualizarEstadoModo(boolean isAuto) {
         ui.btnAuto.setTextColor(isAuto ? Color.WHITE : ui.COLOR_TEXTO_SEC);
-        ui.btnAuto.getBackground().setColorFilter(isAuto ? ui.COLOR_ACCENT : Color.LTGRAY, PorterDuff.Mode.MULTIPLY);
+        ui.btnAuto.getBackground().setColorFilter(isAuto ? ui.COLOR_CONTROL_ACCENT : Color.LTGRAY, PorterDuff.Mode.MULTIPLY);
         ui.btnMan.setTextColor(!isAuto ? Color.WHITE : ui.COLOR_TEXTO_SEC);
-        ui.btnMan.getBackground().setColorFilter(!isAuto ? ui.COLOR_ACCENT : Color.LTGRAY, PorterDuff.Mode.MULTIPLY);
+        ui.btnMan.getBackground().setColorFilter(!isAuto ? ui.COLOR_CONTROL_ACCENT : Color.LTGRAY, PorterDuff.Mode.MULTIPLY);
 
         // Bloquear/Desbloquear sliders manuales según el modo
         ui.sliderManualAz.setEnabled(!isAuto);
         ui.sliderManualEl.setEnabled(!isAuto);
-        ui.labelManualAz.setAlpha(isAuto ? 0.5f : 1.0f);
-        ui.labelManualEl.setAlpha(isAuto ? 0.5f : 1.0f);
+        ui.labelManualAz.setAlpha(isAuto ? 0.3f : 1.0f);
+        ui.labelManualEl.setAlpha(isAuto ? 0.3f : 1.0f);
     }
 
     private void publicarComando(String cmd, float valor, boolean conValor) {
@@ -328,13 +506,18 @@ public class ActividadSeguidor extends Activity implements Runnable {
                 // Esto garantiza que el reloj avance a saltos exactos sin retrasos por
                 // acumulación
                 while ((data = cliente.leerString()) != null) {
+                    if (data.startsWith("TOPIC:" + AlmacenDatosRAM.topicSubDone)) {
+                         myHandler.post(this::finalizarDescarga);
+                         continue;
+                    }
+                    
                     if (procesadorTelemetria.procesarDato(data, this)) {
                         myHandler.post(this::sincronizarControles); // Handler nativo para tocar la UI
                     }
 
                     // GESTIÓN DE ACK (Confirmación de Datalogger)
                     if (AlmacenDatosRAM.pendingAckId != null) {
-                        cliente.publicar("solar/data/ack", AlmacenDatosRAM.pendingAckId);
+                        cliente.publicar(AlmacenDatosRAM.topicPubAck, AlmacenDatosRAM.pendingAckId);
                         AlmacenDatosRAM.pendingAckId = null; // Limpiar para el siguiente
                     }
 
@@ -407,20 +590,37 @@ public class ActividadSeguidor extends Activity implements Runnable {
         if (AlmacenDatosRAM.p2_avg_dia > 0.1f) {
             float g = ((AlmacenDatosRAM.p1_avg_dia / AlmacenDatosRAM.p2_avg_dia) - 1) * 100;
             ui.labelGanancia.setText(String.format("%+.1f%%", g));
+            ui.actualizarGananciaColor(g);
         } else {
             ui.labelGanancia.setText("--- %");
+            ui.actualizarGananciaColor(0);
         }
 
         // --- 3. HEALTH DASHBOARD ---
-        if (!AlmacenDatosRAM.conectado)
-            AlmacenDatosRAM.health_mqtt = 0;
-        else if (AlmacenDatosRAM.health_mqtt == 0)
-            AlmacenDatosRAM.health_mqtt = 2; // Green if connected unless ESP32 says otherwise
+        if (!AlmacenDatosRAM.conectado) {
+            ui.actualizarEstadoGlobal(-1, "DESCONECTADO");
+        } else {
+            // Verificar si el dato global está obsoleto (>5s)
+            long diffGlobal = (System.currentTimeMillis() - AlmacenDatosRAM.ts_mqtt) / 1000;
+            if (diffGlobal > 5) {
+                ui.actualizarEstadoGlobal(-1, "SIN DATOS");
+            } else {
+                int global = AlmacenDatosRAM.health_global;
+                String status = (global == 0) ? "OPERANDO" : (global == 1 ? "ADVERTENCIA" : "FALLA");
+                ui.actualizarEstadoGlobal(global, status);
+            }
+        }
+        
+        // --- 3.1 ALERTA DE DEGRADACIÓN ---
+        if (AlmacenDatosRAM.conectado_PubSub.startsWith("DEG:")) {
+            String comp = AlmacenDatosRAM.conectado_PubSub.substring(4);
+            AlmacenDatosRAM.conectado_PubSub = "Monitoreo activo";
+            Snackbar sb = Snackbar.make(findViewById(android.R.id.content), 
+                "⚠️ ALERTA: Falla en " + comp, Snackbar.LENGTH_LONG);
+            sb.setBackgroundTint(ui.COLOR_HEALTH_CRIT);
+            sb.show();
+        }
 
-        ui.actualizarEstadoIcono(ui.iconHealthMqtt, AlmacenDatosRAM.health_mqtt);
-        ui.actualizarEstadoIcono(ui.iconHealthGps, AlmacenDatosRAM.health_gps);
-        ui.actualizarEstadoIcono(ui.iconHealthIna, AlmacenDatosRAM.health_ina);
-        ui.actualizarEstadoIcono(ui.iconHealthLog, AlmacenDatosRAM.health_disk > 90 ? 1 : 2); // Warn if log > 90%
 
         // --- 4. FEEDBACK DE CONTROLES ---
         long dt = System.currentTimeMillis() - lastManualInteractionTime;
@@ -428,6 +628,12 @@ public class ActividadSeguidor extends Activity implements Runnable {
             ui.sliderLat.setProgress(Math.round(AlmacenDatosRAM.lat * 100 + 9000));
             ui.sliderLon.setProgress(Math.round(AlmacenDatosRAM.lon * 100 + 18000));
         }
+        
+        // Feedback dinámico de comandos
+        actualizarFeedback("lat", AlmacenDatosRAM.lat, ui.feedLat);
+        actualizarFeedback("lon", AlmacenDatosRAM.lon, ui.feedLon);
+        actualizarFeedback("ser_az", AlmacenDatosRAM.servo_az, ui.feedAz);
+        actualizarFeedback("ser_el", AlmacenDatosRAM.servo_el, ui.feedEl);
 
         if (dt > MANUAL_LOCKOUT_MS) {
             intervencionServo = false;
@@ -436,9 +642,27 @@ public class ActividadSeguidor extends Activity implements Runnable {
             actualizarEstadoModo(AlmacenDatosRAM.modo.equals("AUTO"));
         }
 
+        // --- 5. ESTADO DE DESCARGA ---
+        if (ui.progressDownload.getVisibility() == View.VISIBLE) {
+            int count = AlmacenDatosRAM.registrosDatalogger.size();
+            ui.labelDownloadCount.setText(count + " registros recibidos");
+            // Indeterminado hasta que llegue solar/data/done
+        }
+
         ui.textviewFechaHora.setText(AlmacenDatosRAM.fecha + " " + AlmacenDatosRAM.hora);
         ui.textviewAviso.setText(AlmacenDatosRAM.conectado_PubSub);
-        ui.botonConectar.setText(AlmacenDatosRAM.conectado ? "DESCONECTAR" : "CONECTAR");
+        
+        if (!AlmacenDatosRAM.conectado) {
+            if (ui.botonConectar.getText().equals("Conectando...")) {
+                 // Sigue intentando
+            } else {
+                ui.botonConectar.setText("CONECTAR");
+                ui.botonConectar.setEnabled(true);
+            }
+        } else {
+            ui.botonConectar.setText("DESCONECTAR");
+            ui.botonConectar.setEnabled(true);
+        }
     }
 
     @Override

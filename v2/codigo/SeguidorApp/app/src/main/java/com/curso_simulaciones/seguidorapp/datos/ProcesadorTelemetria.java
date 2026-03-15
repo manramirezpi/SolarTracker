@@ -26,16 +26,15 @@ public class ProcesadorTelemetria {
 
     public boolean procesarDato(String data, Context context) {
         try {
-            // DETECCIÓN DE DATOS HISTÓRICOS (Datalogger)
-            if (data.contains("\"m\":") && data.contains("\"p1\":")) {
-                guardarHistoricoCsv(data, context);
-                return false;
+            // DETECCIÓN DE DATOS HISTÓRICOS (Datalogger V2)
+            if (data.startsWith("TOPIC:" + AlmacenDatosRAM.topicSubRecord)) {
+                String payload = data.substring(data.indexOf("|") + 1);
+                return procesarRegistroDatalogger(payload, context);
             }
-
-            // DETECCIÓN DE LOTE DE DATOS (Calibración)
-            if (data.contains("\"part\":")) {
-                guardarBatchTxt(data, context);
-                return false;
+            
+            if (data.startsWith("TOPIC:" + AlmacenDatosRAM.topicSubDone)) {
+                AlmacenDatosRAM.conectado_PubSub = "DOWNLOAD_DONE";
+                return true;
             }
 
             // ESTRATEGIA DE OPTIMIZACIÓN (Garbage Collector Bypass)
@@ -85,11 +84,36 @@ public class ProcesadorTelemetria {
             AlmacenDatosRAM.hora = obj.optString("hora", AlmacenDatosRAM.hora);
 
             if (obj.has("health")) {
-                JSONObject health = obj.getJSONObject("health");
-                AlmacenDatosRAM.health_mqtt = health.optInt("mqtt", 0);
-                AlmacenDatosRAM.health_gps = health.optInt("gps", 0);
-                AlmacenDatosRAM.health_ina = health.optInt("ina", 0);
-                AlmacenDatosRAM.health_disk = health.optInt("disk", 0);
+                String healthStr = obj.getString("health");
+                String[] items = healthStr.split(",");
+                long ahora = System.currentTimeMillis();
+                int prevGlobal = AlmacenDatosRAM.health_global;
+                
+                for (String item : items) {
+                    String[] parts = item.split(":");
+                    if (parts.length == 2) {
+                        String key = parts[0];
+                        int val = Integer.parseInt(parts[1]);
+                        actualizarSubsistema(key, val, ahora);
+                    }
+                }
+                
+                if (obj.has("global")) {
+                    int currentGlobal = obj.getInt("global");
+                    // Notificar si hay degradación (0 -> 1 o 2)
+                    if (prevGlobal == 0 && currentGlobal > 0) {
+                        String comp = "SISTEMA";
+                        if (AlmacenDatosRAM.health_ina > 0) comp = "INA3221";
+                        else if (AlmacenDatosRAM.health_gps > 0) comp = "GPS";
+                        else if (AlmacenDatosRAM.health_wifi > 0) comp = "WIFI";
+                        else if (AlmacenDatosRAM.health_mqtt > 0) comp = "MQTT";
+                        else if (AlmacenDatosRAM.health_disk > 20) comp = "SPIFFS"; // Umbral firmware
+                        else if (AlmacenDatosRAM.health_servos > 0) comp = "SERVOS";
+                        AlmacenDatosRAM.conectado_PubSub = "DEG:" + comp;
+                    }
+                    AlmacenDatosRAM.health_global = currentGlobal;
+                }
+
             }
 
             if (obj.has("modo")) {
@@ -114,6 +138,55 @@ public class ProcesadorTelemetria {
             e.printStackTrace();
         }
         return false;
+    }
+
+    private void actualizarSubsistema(String key, int val, long ts) {
+        if (key.equals("INA")) { AlmacenDatosRAM.health_ina = val; AlmacenDatosRAM.ts_ina = ts; }
+        else if (key.equals("GPS")) { AlmacenDatosRAM.health_gps = val; AlmacenDatosRAM.ts_gps = ts; }
+        else if (key.equals("WIFI")) { AlmacenDatosRAM.health_wifi = val; AlmacenDatosRAM.ts_wifi = ts; }
+        else if (key.equals("MQTT")) { AlmacenDatosRAM.health_mqtt = val; AlmacenDatosRAM.ts_mqtt = ts; }
+        else if (key.equals("SPIFFS")) { AlmacenDatosRAM.health_disk = val; AlmacenDatosRAM.ts_disk = ts; }
+        else if (key.equals("SERVOS")) { AlmacenDatosRAM.health_servos = val; AlmacenDatosRAM.ts_servos = ts; }
+    }
+
+    private boolean procesarRegistroDatalogger(String payload, Context context) {
+        // Formato esperado: HH:MM:SS,p1,p2
+        try {
+            String[] parts = payload.split(",");
+            if (parts.length != 3) {
+                publicarNack(payload);
+                return false;
+            }
+
+            String hora = parts[0];
+            float p1 = Float.parseFloat(parts[1]);
+            float p2 = Float.parseFloat(parts[2]);
+
+            // Validación de rangos
+            boolean horaValida = hora.matches("([01]?[0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]");
+            boolean p1Valida = (p1 >= 0 && p1 <= 700);
+            boolean p2Valida = (p2 >= 0 && p2 <= 700);
+
+            if (horaValida && p1Valida && p2Valida) {
+                // Acumular en memoria (según req)
+                AlmacenDatosRAM.registrosDatalogger.add(payload);
+                
+                // Confirmar con ACK mandando el timestamp
+                AlmacenDatosRAM.pendingAckId = hora; 
+                return true;
+            } else {
+                publicarNack(hora);
+                return false;
+            }
+        } catch (Exception e) {
+            publicarNack("error");
+            return false;
+        }
+    }
+
+    private void publicarNack(String timestamp) {
+        // El hilo de Actividad escuchará este pendingAckId especial
+        AlmacenDatosRAM.pendingAckId = "NACK:" + timestamp;
     }
 
     private float extraerFloat(String json, String key, int searchFromIndex) {

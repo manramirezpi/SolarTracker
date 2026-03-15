@@ -14,12 +14,17 @@ public class AlmacenDatosRAM {
     public static String PASSWORD = "iotfisica";
     public static String topicSubFast = "solar/status/fast";
     public static String topicSubSlow = "solar/status/slow";
-    public static String topicSubBatch = "solar/data/batch";
-    public static String topicDebug = "solar/debug/data";
+    public static String topicSubRecord = "solar/data/record";
+    public static String topicSubDone = "solar/data/done";
+    public static String topicAppStatus = "solar/app/status";
     public static String topicPub = "solar/cmd";
+    public static String topicPubAck = "solar/data/ack";
 
     public static volatile String conectado_PubSub = "Hacer clic en CONECTAR...";
     public static volatile boolean conectado = false;
+
+    // Lista en memoria para acumular registros (según req)
+    public static ArrayList<String> registrosDatalogger = new ArrayList<>();
 
     // Datos del Sol
     public static volatile float sol_az = 0;
@@ -34,12 +39,24 @@ public class AlmacenDatosRAM {
     public static volatile float lon = 0;
     public static volatile boolean gps_valido = false;
 
-    // --- ESTADOS DE SALUD (HEALTH SYSTEM v2.1) ---
-    // 0: Error/Desconectado, 1: Advertencia/Ocupado, 2: Saludable/Fix
+    // --- ESTADOS DE SALUD (HEALTH SYSTEM v2.5) ---
+    // 0: Falla/Desconectado, 1: Advertencia/Ocupado, 2: Operando/Ok
     public static volatile int health_mqtt = 0;
     public static volatile int health_gps = 0;
     public static volatile int health_ina = 0;
+    public static volatile int health_wifi = 0;
+    public static volatile int health_servos = 0;
     public static volatile int health_disk = 0; // % de ocupación o estado datalogger
+    public static volatile int health_global = 2; // Arreglo para v2.5
+
+    // Timestamps para el monitoreo de tiempo desde la última actualización
+    public static volatile long ts_mqtt = 0;
+    public static volatile long ts_gps = 0;
+    public static volatile long ts_ina = 0;
+    public static volatile long ts_wifi = 0;
+    public static volatile long ts_servos = 0;
+    public static volatile long ts_disk = 0;
+
     public static volatile String pendingAckId = null; // ID pendiente de confirmar (ACK)
 
     // Fecha y Hora

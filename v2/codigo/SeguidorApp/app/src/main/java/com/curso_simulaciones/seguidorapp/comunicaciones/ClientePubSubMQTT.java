@@ -33,7 +33,6 @@ public class ClientePubSubMQTT implements MqttCallback, IMqttActionListener {
         this.actividad = actividad;
         this.topicSubFast = AlmacenDatosRAM.topicSubFast;
         this.topicSubSlow = AlmacenDatosRAM.topicSubSlow;
-        this.topicSubBatch = AlmacenDatosRAM.topicSubBatch;
         this.topicPub = AlmacenDatosRAM.topicPub;
     }
 
@@ -49,6 +48,8 @@ public class ClientePubSubMQTT implements MqttCallback, IMqttActionListener {
         options.setPassword(AlmacenDatosRAM.PASSWORD.toCharArray());
         options.setCleanSession(true);
         options.setAutomaticReconnect(true);
+        // Requerimiento: Last Will "offline"
+        options.setWill(AlmacenDatosRAM.topicAppStatus, "offline".getBytes(), 1, true);
 
         try {
             client.connect(options, null, this);
@@ -65,12 +66,13 @@ public class ClientePubSubMQTT implements MqttCallback, IMqttActionListener {
             Log.d(TAG, "Conexión exitosa. Suscribiendo a canales de telemetría...");
             client.subscribe(topicSubFast, 0);
             client.subscribe(topicSubSlow, 0);
-            client.subscribe(topicSubBatch, 0);
+            client.subscribe(AlmacenDatosRAM.topicSubRecord, 1);
+            client.subscribe(AlmacenDatosRAM.topicSubDone, 1);
 
-            // Notificar presencia para activar descarga de Datalogger
-            publicar("solar/app/status", "online");
+            // Requerimiento: Notificar presencia "online" con retain=true
+            publicarOnline();
 
-            AlmacenDatosRAM.conectado_PubSub = "Monitoreo activado (FAST/SLOW/BATCH)";
+            AlmacenDatosRAM.conectado_PubSub = "Monitoreo activado";
             AlmacenDatosRAM.conectado = true;
         } catch (Exception e) {
             Log.e(TAG, "Error al suscribir", e);
@@ -99,11 +101,33 @@ public class ClientePubSubMQTT implements MqttCallback, IMqttActionListener {
         String payload = new String(mqttMessage.getPayload());
         Log.d(TAG, "Mensaje de " + topic + ": " + payload);
         // Aceptamos cualquier dato de nuestros tópicos de suscripción
-        if (topic.equals(topicSubFast) || topic.equals(topicSubSlow) || topic.equals(topicSubBatch)) {
-            colaMensajes.add(payload);
-            // Evitar saturación de memoria si la UI se suspende
-            if (colaMensajes.size() > 50) {
-                colaMensajes.poll();
+        if (topic.equals(topicSubFast) || topic.equals(topicSubSlow) || 
+            topic.equals(AlmacenDatosRAM.topicSubRecord) || topic.equals(AlmacenDatosRAM.topicSubDone)) {
+            
+            // Si es telemetría normal, agregar a la cola
+            if (topic.equals(topicSubFast) || topic.equals(topicSubSlow)) {
+                colaMensajes.add(payload);
+                if (colaMensajes.size() > 50) colaMensajes.poll();
+            }
+            
+            // Procesamiento inmediato de descarga (hilo separado)
+            if (topic.equals(AlmacenDatosRAM.topicSubRecord) || topic.equals(AlmacenDatosRAM.topicSubDone)) {
+                 // Notificar a la UI o procesador
+                 // Agregamos a la cola para que Actividad lo procese en su hilo
+                 colaMensajes.add("TOPIC:" + topic + "|" + payload);
+            }
+        }
+    }
+
+    private void publicarOnline() {
+        if (client != null && client.isConnected()) {
+            try {
+                MqttMessage message = new MqttMessage("online".getBytes());
+                message.setQos(1);
+                message.setRetained(true);
+                client.publish(AlmacenDatosRAM.topicAppStatus, message);
+            } catch (Exception e) {
+                Log.e(TAG, "Error al publicar online", e);
             }
         }
     }

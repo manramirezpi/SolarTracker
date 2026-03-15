@@ -10,8 +10,10 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.SeekBar;
 import android.widget.TextView;
+import android.widget.FrameLayout;
 
 import com.curso_simulaciones.seguidorapp.datos.AlmacenDatosRAM;
 
@@ -32,18 +34,32 @@ public class GeneradorUI {
     public TextView solAz, solEl, servoAz, servoEl, errAz, errEl;
     public TextView p1Inst, p1Avg, p1Daily, p2Inst, p2Avg, p2Daily, labelGanancia;
     public Button btnAuto, btnMan;
-    public TextView iconHealthMqtt, iconHealthGps, iconHealthIna, iconHealthLog;
+    public View healthIndicator;
+    public TextView healthStatusText;
+    public ProgressBar progressDownload;
+    public TextView labelDownloadCount;
+    
+    // Labels de feedback para comandos
+    public TextView feedLat, feedLon, feedAz, feedEl;
 
-    // --- PALETA DE COLORES v2.1 (TEMA CLARO INDUSTRIAL) ---
-    public final int COLOR_FONDO = Color.parseColor("#F2F2F7"); // Gris claro iOS style
-    public final int COLOR_CARD = Color.WHITE;
-    public final int COLOR_ACCENT = Color.parseColor("#007AFF"); // Azul sistema
-    public final int COLOR_TEXTO_PRI = Color.parseColor("#1C1C1E"); // Casi negro
-    public final int COLOR_TEXTO_SEC = Color.parseColor("#8E8E93"); // Gris medio
-    public final int COLOR_ERROR = Color.parseColor("#FF3B30");
-    public final int COLOR_OK = Color.parseColor("#34C759");
-    public final int COLOR_WARN = Color.parseColor("#FFCC00");
-    public final int COLOR_BORDE = Color.parseColor("#E5E5EA");
+    // --- PALETA DE COLORES v2.5 (INDUSTRIAL MONOTONE) ---
+    public final int COLOR_FONDO = Color.WHITE;
+    public final int COLOR_CONTROL_BG = Color.parseColor("#F5F5F5");
+    public final int COLOR_CONTROL_ACCENT = Color.parseColor("#1565C0"); // Azul industrial
+    public final int COLOR_TEXTO_PRI = Color.parseColor("#212121");
+    public final int COLOR_TEXTO_SEC = Color.parseColor("#757575");
+    
+    public final int COLOR_HEALTH_OK = Color.parseColor("#2E7D32");    // Verde
+    public final int COLOR_HEALTH_WARN = Color.parseColor("#F9A825");  // Amarillo
+    public final int COLOR_HEALTH_CRIT = Color.parseColor("#C62828");  // Rojo
+    public final int COLOR_HEALTH_DISC = Color.parseColor("#757575");  // Gris
+    
+    public final int COLOR_BORDE = Color.parseColor("#E0E0E0");
+    
+    public final int COLOR_GAIN_POS_TXT = Color.parseColor("#2E7D32");
+    public final int COLOR_GAIN_POS_BG = Color.parseColor("#E8F5E9");
+    public final int COLOR_GAIN_NEG_TXT = Color.parseColor("#C62828");
+    public final int COLOR_GAIN_NEG_BG = Color.parseColor("#FFEBEE");
 
     public SeekBar sliderLat, sliderLon, sliderManualAz, sliderManualEl;
 
@@ -120,39 +136,54 @@ public class GeneradorUI {
         textviewFechaHora.setTextColor(COLOR_TEXTO_SEC);
         textviewFechaHora.setTextSize(11);
 
-        // Iconos de Salud
-        iconHealthMqtt = configHealthIcon("MQTT");
-        iconHealthGps = configHealthIcon("GPS");
-        iconHealthIna = configHealthIcon("INA");
-        iconHealthLog = configHealthIcon("DISK");
+        // Icono de Salud Global
+        healthIndicator = new View(actividad);
+        healthStatusText = new TextView(actividad);
+        healthStatusText.setText("DESCONECTADO");
+        healthStatusText.setTextSize(12);
+        healthStatusText.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
+        healthStatusText.setPadding(dp(8), 0, 0, 0);
+
+        // Barra de descarga
+        progressDownload = new ProgressBar(actividad, null, android.R.attr.progressBarStyleHorizontal);
+        progressDownload.setVisibility(View.GONE);
+        labelDownloadCount = configLabel("0 registros recibidos");
+        labelDownloadCount.setVisibility(View.GONE);
+        
+        // Feedback de comandos
+        feedLat = configFeedback(); feedLon = configFeedback();
+        feedAz = configFeedback(); feedEl = configFeedback();
     }
 
-    private TextView configHealthIcon(String name) {
+    private TextView configFeedback() {
         TextView tv = new TextView(actividad);
-        tv.setText(name);
-        tv.setTextSize(9);
-        tv.setTypeface(null, Typeface.BOLD);
-        tv.setTextColor(Color.WHITE);
-        tv.setPadding(dp(8), dp(3), dp(8), dp(3));
-        tv.setGravity(Gravity.CENTER);
-        actualizarEstadoIcono(tv, 0); 
+        tv.setTextSize(10);
+        tv.setTypeface(null, Typeface.ITALIC);
+        tv.setPadding(dp(10), 0, 0, 0);
         return tv;
     }
 
-    public void actualizarEstadoIcono(TextView tv, int state) {
+    public void actualizarEstadoGlobal(int state, String text) {
+        int color = COLOR_HEALTH_DISC; // Default Gris
+        if (state == 0) color = COLOR_HEALTH_OK;
+        else if (state == 1) color = COLOR_HEALTH_WARN;
+        else if (state == 2) color = COLOR_HEALTH_CRIT;
+
         GradientDrawable gd = new GradientDrawable();
-        gd.setCornerRadius(dp(6));
-        int color = (state == 2) ? COLOR_OK : (state == 1 ? COLOR_WARN : COLOR_ERROR);
+        gd.setShape(GradientDrawable.OVAL);
         gd.setColor(color);
-        tv.setBackground(gd);
+        healthIndicator.setBackground(gd);
+        healthStatusText.setText(text);
+        healthStatusText.setTextColor(color);
     }
+
 
     private TextView configDato(String t) {
         TextView tv = new TextView(actividad);
         tv.setText(t);
         tv.setTextColor(COLOR_TEXTO_PRI);
         tv.setTextSize(15);
-        tv.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        tv.setTypeface(Typeface.create("monospace", Typeface.BOLD));
         tv.setGravity(Gravity.CENTER);
         return tv;
     }
@@ -160,11 +191,11 @@ public class GeneradorUI {
     private Button configBotonTab(String text, boolean active) {
         Button b = new Button(actividad);
         b.setText(text);
-        b.setAllCaps(false);
-        b.setTextSize(12);
-        b.setTypeface(Typeface.SANS_SERIF, Typeface.BOLD);
+        b.setAllCaps(true);
+        b.setTextSize(11);
+        b.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         b.setTextColor(active ? Color.WHITE : COLOR_TEXTO_SEC);
-        b.getBackground().setColorFilter(active ? COLOR_ACCENT : Color.LTGRAY, PorterDuff.Mode.MULTIPLY);
+        b.getBackground().setColorFilter(active ? COLOR_CONTROL_ACCENT : Color.LTGRAY, PorterDuff.Mode.MULTIPLY);
         return b;
     }
 
@@ -177,8 +208,9 @@ public class GeneradorUI {
             sb.setMax(max - min);
         }
         sb.setProgress(progress);
-        sb.getProgressDrawable().setColorFilter(COLOR_ACCENT, PorterDuff.Mode.SRC_IN);
-        sb.getThumb().setColorFilter(COLOR_ACCENT, PorterDuff.Mode.SRC_IN);
+        sb.setPadding(0, dp(10), 0, dp(10));
+        sb.getProgressDrawable().setColorFilter(COLOR_CONTROL_ACCENT, PorterDuff.Mode.SRC_IN);
+        sb.getThumb().setColorFilter(COLOR_CONTROL_ACCENT, PorterDuff.Mode.SRC_IN);
         return sb;
     }
 
@@ -195,51 +227,45 @@ public class GeneradorUI {
         LinearLayout main = new LinearLayout(actividad);
         main.setOrientation(LinearLayout.VERTICAL);
         main.setBackgroundColor(COLOR_FONDO);
-        main.setPadding(dp(20), dp(15), dp(20), dp(15));
+        main.setPadding(dp(16), dp(16), dp(16), dp(16));
 
-        // --- HEADER CON HEALTH MONITOR ---
+        // --- HEADER ---
         LinearLayout header = new LinearLayout(actividad);
         header.setGravity(Gravity.CENTER_VERTICAL);
         
         TextView title = new TextView(actividad);
-        title.setText("SolarTracker v2.1");
-        title.setTextSize(20);
-        title.setTypeface(Typeface.SANS_SERIF, Typeface.BOLD);
+        title.setText("SOLAR TRACKER MONITOR");
+        title.setTextSize(14);
+        title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         title.setTextColor(COLOR_TEXTO_PRI);
-        
         header.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
         
         LinearLayout healthBox = new LinearLayout(actividad);
-        healthBox.addView(iconHealthMqtt);
-        healthBox.addView(gapH(6));
-        healthBox.addView(iconHealthGps);
-        healthBox.addView(gapH(6));
-        healthBox.addView(iconHealthIna);
-        healthBox.addView(gapH(6));
-        healthBox.addView(iconHealthLog);
+        healthBox.setGravity(Gravity.CENTER_VERTICAL);
+        healthBox.addView(healthIndicator, new LinearLayout.LayoutParams(dp(22), dp(22)));
+        healthBox.addView(healthStatusText);
         header.addView(healthBox);
-
         main.addView(header);
-        main.addView(gapV(20));
-
-        // --- SECCIÓN 1: POSICIÓN (TRACKING) ---
-        main.addView(crearCard(crearTablaTracking()));
-        main.addView(gapV(15));
-
-        // --- SECCIÓN 2: BALANCE ENERGÉTICO ---
-        main.addView(crearCard(crearTablaPotencia()));
-        main.addView(gapV(15));
-
-        // --- SECCIÓN 3: PANELES DE CONTROL (UBICACIÓN Y MANUAL) ---
-        LinearLayout rowCtrl = new LinearLayout(actividad);
-        rowCtrl.addView(crearCard(crearPanelUbicacion()), new LinearLayout.LayoutParams(0, -2, 1));
-        rowCtrl.addView(gapH(12));
-        rowCtrl.addView(crearCard(crearPanelManual()), new LinearLayout.LayoutParams(0, -2, 1));
         
-        main.addView(rowCtrl);
-        main.addView(gapV(20));
+        main.addView(gapV(16));
 
-        // --- FOOTER: FECHA, ESTADO Y ACCIONES ---
+        // --- ZONA DE MONITOREO (FONDO BLANCO) ---
+        main.addView(crearTablaTracking());
+        main.addView(gapV(24));
+        main.addView(crearTablaPotencia());
+        main.addView(gapV(24));
+
+        // --- ZONA DE CONTROL (FONDO GRIS + BORDE AZUL) ---
+        main.addView(crearZonaControl());
+        
+        main.addView(gapV(16));
+        
+        // --- BARRA DE DESCARGA ---
+        main.addView(labelDownloadCount);
+        main.addView(progressDownload);
+        main.addView(gapV(16));
+
+        // --- FOOTER ---
         LinearLayout footer = new LinearLayout(actividad);
         footer.setGravity(Gravity.CENTER_VERTICAL);
         
@@ -247,26 +273,50 @@ public class GeneradorUI {
         footerInfo.setOrientation(LinearLayout.VERTICAL);
         footerInfo.addView(textviewFechaHora);
         footerInfo.addView(textviewAviso);
-        
         footer.addView(footerInfo, new LinearLayout.LayoutParams(0, -2, 1));
         
         footer.addView(botonShare);
+        footer.addView(gapH(8));
         footer.addView(botonTemp);
+        footer.addView(gapH(8));
         footer.addView(botonConectar);
         
         main.addView(footer);
-
         return main;
     }
 
-    private LinearLayout crearCard(View view) {
-        LinearLayout card = new LinearLayout(actividad);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackground(crearFondoCard());
-        card.setPadding(dp(16), dp(16), dp(16), dp(16));
-        card.addView(view);
-        return card;
+    private LinearLayout crearZonaControl() {
+        LinearLayout container = new LinearLayout(actividad);
+        container.setOrientation(LinearLayout.VERTICAL);
+        container.setBackgroundColor(COLOR_CONTROL_BG);
+        
+        // Borde izquierdo azul
+        GradientDrawable gd = new GradientDrawable();
+        gd.setColor(COLOR_CONTROL_BG);
+        container.setBackground(gd);
+        
+        // En Android para un borde lateral se suele usar un View o un layer-list. 
+        // Aquí lo haremos con un FrameLayout envolvente.
+        FrameLayout edge = new FrameLayout(actividad);
+        View line = new View(actividad);
+        line.setBackgroundColor(COLOR_CONTROL_ACCENT);
+        
+        LinearLayout content = new LinearLayout(actividad);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(16), dp(16), dp(16), dp(16));
+        
+        content.addView(crearPanelUbicacion());
+        content.addView(gapV(16));
+        content.addView(crearPanelManual());
+        
+        edge.addView(content);
+        edge.addView(line, new FrameLayout.LayoutParams(dp(3), FrameLayout.LayoutParams.MATCH_PARENT));
+        
+        return edge;
     }
+
+    // crearCard eliminado para monitoreo (fondo blanco plano)
+
 
     private View gapV(int d) { 
         View v = new View(actividad); 
@@ -288,7 +338,7 @@ public class GeneradorUI {
     private LinearLayout crearTablaTracking() {
         LinearLayout l = new LinearLayout(actividad);
         l.setOrientation(LinearLayout.VERTICAL);
-        l.addView(crearFila("POSICIÓN", "Solar", "Servo", "Error", true));
+        l.addView(crearFila("SISTEMA DE SEGUIMIENTO", "Solar", "Servo", "Error", true));
         l.addView(gapV(8));
         l.addView(crearFila("Azimut", solAz, servoAz, errAz));
         l.addView(crearFila("Elevación", solEl, servoEl, errEl));
@@ -298,7 +348,7 @@ public class GeneradorUI {
     private LinearLayout crearTablaPotencia() {
         LinearLayout l = new LinearLayout(actividad);
         l.setOrientation(LinearLayout.VERTICAL);
-        l.addView(crearFila("POTENCIA", "Tracker", "Estático", "", true));
+        l.addView(crearFila("RENDIMIENTO METROLÓGICO", "Tracker", "Estático", "", true));
         l.addView(gapV(8));
         l.addView(crearFila("Instantánea", p1Inst, p2Inst, null));
         l.addView(crearFila("Promedio", p1Avg, p2Avg, null));
@@ -324,9 +374,9 @@ public class GeneradorUI {
         
         TextView tLabel = new TextView(actividad);
         tLabel.setText(label);
-        tLabel.setTextColor(title ? COLOR_ACCENT : COLOR_TEXTO_SEC);
-        tLabel.setTextSize(title ? 12 : 14);
-        if (title) tLabel.setTypeface(null, Typeface.BOLD);
+        tLabel.setTextColor(title ? COLOR_CONTROL_ACCENT : COLOR_TEXTO_SEC);
+        tLabel.setTextSize(title ? 11 : 13);
+        if (title) tLabel.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         r.addView(tLabel, new LinearLayout.LayoutParams(0, -2, 4));
 
         Object[] cols = {c1, c2, c3};
@@ -360,11 +410,18 @@ public class GeneradorUI {
         t.setTypeface(null, Typeface.BOLD);
         l.addView(t);
         l.addView(gapV(8));
-        l.addView(labelLat);
+        l.addView(crearLabelConFeedback(labelLat, feedLat));
         l.addView(sliderLat);
-        l.addView(labelLon);
+        l.addView(crearLabelConFeedback(labelLon, feedLon));
         l.addView(sliderLon);
         return l;
+    }
+    
+    private LinearLayout crearLabelConFeedback(TextView label, TextView feed) {
+        LinearLayout r = new LinearLayout(actividad);
+        r.addView(label);
+        r.addView(feed);
+        return r;
     }
 
     private LinearLayout crearPanelManual() {
@@ -377,12 +434,30 @@ public class GeneradorUI {
         l.addView(toggle);
         
         l.addView(gapV(10));
-        l.addView(labelManualAz);
+        l.addView(crearLabelConFeedback(labelManualAz, feedAz));
         l.addView(sliderManualAz);
-        l.addView(labelManualEl);
+        l.addView(crearLabelConFeedback(labelManualEl, feedEl));
         l.addView(sliderManualEl);
-        l.addView(botonResetGPS);
+        
+        LinearLayout actionRow = new LinearLayout(actividad);
+        actionRow.setGravity(Gravity.CENTER_VERTICAL);
+        actionRow.addView(botonResetGPS);
+        l.addView(actionRow);
+        
         return l;
+    }
+    
+    public void actualizarGananciaColor(float ganancia) {
+        if (ganancia > 0) {
+            labelGanancia.setTextColor(COLOR_GAIN_POS_TXT);
+            labelGanancia.setBackgroundColor(COLOR_GAIN_POS_BG);
+        } else if (ganancia < 0) {
+            labelGanancia.setTextColor(COLOR_GAIN_NEG_TXT);
+            labelGanancia.setBackgroundColor(COLOR_GAIN_NEG_BG);
+        } else {
+            labelGanancia.setTextColor(COLOR_TEXTO_SEC);
+            labelGanancia.setBackgroundColor(Color.TRANSPARENT);
+        }
     }
 
     private GradientDrawable crearFondoCard() {

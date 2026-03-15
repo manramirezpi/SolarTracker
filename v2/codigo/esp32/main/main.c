@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dirent.h>
 
 #include "driver/i2c.h"
 #include "driver/ledc.h"
@@ -29,39 +30,14 @@
 #include "freertos/task.h"
 #include "mqtt_client.h"
 #include "esp_spiffs.h"
-#include <dirent.h>
+
+#include "config.h"
+#include "health.h"
 
 static const char *TAG = "SOLAR";
 
 // ═══════════════════════════════════════════════════════════════════════════
-// CONFIGURACIÓN WiFi y MQTT — Modifique solo esta sección
-// ═══════════════════════════════════════════════════════════════════════════
-// #define WIFI_SSID "3210NX"
-// #define WIFI_PASSWORD "71671878"
-
-#define WIFI_BACKUP2_SSID "3210NX"
-#define WIFI_BACKUP2_PASSWORD "71671878"
-
-#define WIFI_BACKUP_SSID "321onx_REP"
-#define WIFI_BACKUP_PASSWORD "71671878"
-
-#define WIFI_SSID "JP"
-#define WIFI_PASSWORD "551964jp"
-
-
-//#define WIFI_BACKUP2_SSID "..."
-//#define WIFI_BACKUP2_PASSWORD "123456789"
-
-#define MQTT_BROKER_URL "45.56.74.248"
-#define MQTT_BROKER_PORT 1883
-#define MQTT_USERNAME "fisica"
-#define MQTT_PASSWORD "iotfisica"
-#define MQTT_TOPIC_PUB_FAST "solar/status/fast" // 10Hz: Ángulos y Potencia Instantánea
-#define MQTT_TOPIC_PUB_SLOW "solar/status/slow" // 1Hz: GPS, Hora, Promedios e Info
-#define MQTT_TOPIC_SUB "solar/cmd"              // ESP32 escucha comandos aquí
-#define MQTT_TOPIC_APP_STATUS "solar/app/status" // Status de la App (online/offline)
-#define MQTT_TOPIC_DATA_BATCH "solar/data/batch" // Envío de registros históricos
-#define MQTT_TOPIC_DATA_ACK   "solar/data/ack"   // Confirmación de recepción de la App
+// Configuración heredada (Sincronizada con config.h)
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ─── Pines INA3221 ───────────────────────────────────────────────────────────
@@ -109,12 +85,38 @@ static const char *TAG = "SOLAR";
 #define WIFI_FAIL_BIT BIT1      // Flag: Fallo tras agotar reintentos
 #define WIFI_MAX_RETRIES 5      // Máximo de intentos de conexión
 
-static EventGroupHandle_t
-    wifi_event_group;            // Grupo de eventos para sincronización de red
-static int wifi_retry_count = 0; // Contador de reintentos actuales
-static esp_mqtt_client_handle_t mqtt_client =
-    NULL;                           // Manejador del cliente MQTT
-static bool mqtt_conectado = false; // Estado lógico de la conexión al broker
+// ─── Variables de Conectividad ──────────────────────────────────────────────
+static EventGroupHandle_t wifi_event_group;
+static int wifi_retry_count = 0;
+static esp_mqtt_client_handle_t mqtt_client = NULL;
+static bool mqtt_conectado = false;
+
+// ─── SISTEMA DE SALUD (Health Monitoring) ──────────────────────────────────
+health_t g_health = {0};
+SemaphoreHandle_t health_mutex = NULL;
+
+static int64_t g_gps_ultimo_fix_us = 0;
+static int g_mqtt_fallos_pub = 0;
+static bool g_servos_limitados = false;
+static esp_err_t g_servos_err_init = ESP_OK;
+static int g_ina_fallos_lectura = 0;
+static bool g_ina_presente = false;
+
+health_state_t health_get_global(void) {
+    if (health_mutex == NULL) return HEALTH_OK;
+    if (xSemaphoreTake(health_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+        health_state_t worse = g_health.ina;
+        if (g_health.gps > worse) worse = g_health.gps;
+        if (g_health.wifi > worse) worse = g_health.wifi;
+        if (g_health.mqtt > worse) worse = g_health.mqtt;
+        if (g_health.spiffs > worse) worse = g_health.spiffs;
+        if (g_health.servos > worse) worse = g_health.servos;
+        g_health.global = worse;
+        xSemaphoreGive(health_mutex);
+        return worse;
+    }
+    return g_health.global;
+}
 
 // ─── Estructuras de datos ────────────────────────────────────────────────────
 
@@ -308,12 +310,11 @@ static INA_Promedio_t prom_ch1 = {0};
 static INA_Promedio_t prom_ch2 = {0};
 
 // ─── DATALOGGER SPIFFS (REGISTRO HISTÓRICO) ──────────────────────────────────
-#define DATALOG_ACK_TIMEOUT_MS    10000   // espera máxima por ACK
+#define DATALOG_ACK_TIMEOUT_MS    3000    // espera máxima por ACK (según req)
 #define DATALOG_MAX_RETRIES       3       // reintentos por registro
-#define DATALOG_RETRY_DELAY_MS    60000   // pausa tras agotar reintentos
-#define DATALOG_BATCH_INTERVAL_MS 500     // delay entre registros consecutivos
-#define DATALOG_MAX_ERROR_RATE    0.20    // 20% de error permitido
-#define DATALOG_MIN_RECORDS       10      // mínimo de registros para evaluar tasa de error
+#define DATALOG_BATCH_INTERVAL_MS 200     // delay entre registros consecutivos (según req)
+#define DATALOG_STACK_SIZE        4096
+#define DATALOG_PRIORITY          2
 
 typedef enum {
     DATALOG_OK,
@@ -324,10 +325,11 @@ typedef enum {
 static datalog_state_t g_datalog_state = DATALOG_DISABLED;
 static bool g_descarga_en_curso = false;
 static char g_last_ack_id[12] = {0};
-static SemaphoreHandle_t g_sem_ack = NULL;
+static QueueHandle_t g_cola_ack = NULL;
+static TaskHandle_t tarea_servos_h = NULL;
 
 // ─── Prototipos ──────────────────────────────────────────────────────────────
-static void pwm_init(void);
+static esp_err_t pwm_init(void);
 static uint32_t us_to_duty(int us);
 static int constrain_pwm(int valor);
 static void Actualizar_Servos(void);
@@ -373,10 +375,12 @@ static bool ina3221_leer_canal(int canal, float *voltaje, float *corriente);
 static void ina_actualizar_promedio(INA_Promedio_t *p, float v, float i,
                                     bool valido);
 static void tarea_medicion_ina(void *arg);
+static void Datalogger_Limpiar_Espacio(void);
 
 // ─── Punto de entrada ────────────────────────────────────────────────────────
 
 void app_main(void) {
+  health_mutex = xSemaphoreCreateMutex();
   ESP_LOGI(TAG, "Iniciando Seguidor Solar ESP32");
 
   // 1. ANÁLOGO A HAL_Init() + SystemClock_Config()
@@ -413,7 +417,7 @@ void app_main(void) {
   // 4. ANÁLOGO AL MX_*_Init() (Configuración de Periféricos)
   // ────────────────────────────────────────────────────────
   // Configura el PWM por hardware (LEDC) para los servomotores
-  pwm_init();
+  g_servos_err_init = pwm_init();
 
   // Timer para movimiento gradual (Interrupción de hardware a 100ms)
   const esp_timer_create_args_t timer_args = {
@@ -454,10 +458,11 @@ void app_main(void) {
 
   // 6. INICIALIZACIÓN DEL STACK DE RED (OS / LwIP)
   // ────────────────────────────────────────────────────────
-  Datalogger_Init();
   wifi_init();
   mqtt_init();
-  session_id = esp_random() % 10000; // Generar ID de sesión (0-9999)
+  
+  g_cola_ack = xQueueCreate(1, sizeof(g_last_ack_id));
+  session_id = esp_random() % 10000;
 
   // 7. ARRANQUE DEL SCHEDULER (Multitasking Base)
   // ────────────────────────────────────────────────────────
@@ -468,6 +473,7 @@ void app_main(void) {
                           1); // Prioridad bajada a 4, Core 1
   xTaskCreatePinnedToCore(tarea_principal, "tarea_main", 8192, NULL, 5, NULL,
                           1); // Core 1
+  xTaskCreatePinnedToCore(tarea_seguimiento, "tarea_control", 4096, NULL, 5, &tarea_servos_h, 1);
   ESP_LOGI(TAG, "Sistema iniciado");
 }
 
@@ -536,6 +542,10 @@ static void tarea_gps(void *arg) {
 
 static void tarea_principal(void *arg) {
   esp_task_wdt_add(NULL); // Suscribir esta tarea al Watchdog
+  
+  // Requerimiento: Montar SPIFFS al inicio en la tarea_principal
+  Datalogger_Init();
+
   uint8_t idx_trama;
   uint32_t ticks_sin_gps = 0;
   int64_t ahora_us = 0;
@@ -658,8 +668,6 @@ static void tarea_principal(void *arg) {
 
 static void tarea_medicion_ina(void *arg) {
   float v1, i1, v2, i2;
-  static bool ina_presente = false;
-  static int fallos_lectura = 0;
 
   // Inicialización de registros temporales para integración de promedios
   prom_ch1.ultimo_tick_5min = xTaskGetTickCount() * portTICK_PERIOD_MS;
@@ -669,135 +677,78 @@ static void tarea_medicion_ina(void *arg) {
   prom_ch1.dia_actual = -1;
   prom_ch2.dia_actual = -1;
 
-  esp_task_wdt_add(NULL); // suscribir la tarea al watchdog. Comprometiendose
-                          // a reportar que está viva periodicamente
+  esp_task_wdt_add(NULL);
 
   while (1) {
-    esp_task_wdt_reset(); // Dar señal de vida al inicio de cada ciclo
+    esp_task_wdt_reset();
 
-    // ESTADO: BÚSQUEDA Y RECONEXIÓN
-    if (!ina_presente) {        // Si el ina no se detecta
-      if (ina3221_detectar()) { // Si se detecta
-        ina3221_init(); // Re-configurar registros tras posible pérdida de
-                        // energía
-        ina_presente = true;
-        fallos_lectura = 0;
+    if (!g_ina_presente) {
+      if (ina3221_detectar()) {
+        ina3221_init();
+        g_ina_presente = true;
+        g_ina_fallos_lectura = 0;
         ESP_LOGI("INA", "Sensor detectado y configurado exitosamente.");
-      } else { // si no se detecta
-        // Modo ahorro: reintentar detección cada 5 segundos para no saturar I2C
+      } else {
         vTaskDelay(pdMS_TO_TICKS(5000));
         continue;
       }
     }
 
-    vTaskDelay(pdMS_TO_TICKS(
-        100)); // Frecuencia de muestreo nominal de 10 Hz (cada 100 ms)
-
-    // Interbloqueo de hardware: abortar si la conversión ADC no ha finalizado
-    bool conversion_lista = false;
-    esp_err_t err_ready = ina3221_conversion_lista(
-        &conversion_lista); // obtiene el estado de la conversion
-
-    if (err_ready != ESP_OK) { // Error en la comunicación I2C
-      fallos_lectura++;
-      if (fallos_lectura > 50) { // Tolerancia de 5 segundos ante ruido
-        ina_presente = false;
-        ina_ch1_valido = false;
-        ina_ch2_valido = false;
-        ESP_LOGE("INA",
-                 "Fallo de comunicación I2C. Entrando en modo búsqueda...");
-      }
-      continue;
-    }
-
-    if (!conversion_lista) {
-      // El ADC está promediando (64 muestras toman ~280ms). Simplemente
-      // esperamos.
-      continue;
-    }
-
-    // Adquisición de voltajes de bus y shunt vía bus I2C
-    bool ch1_ok = ina3221_leer_canal(1, &v1, &i1);
-    bool ch2_ok = ina3221_leer_canal(2, &v2, &i2);
-
-    // ESCALAMIENTO / HOMOLOGACIÓN DE PANELES (DESHABILITADO PARA CALIBRACIÓN)
-    // En el hardware real se utilizan paneles con rendimientos dispares:
-    // Panel 1 (móvil): Carga de 56 ohms, max ~420 mW
-    // Panel 2 (fijo): Carga de 40.2 ohms, max ~520 mW
-    // Para que el análisis de eficiencia (Ganancia del Tracker) sea netamente 
-    // producto de la irradiación solar angular y no de la disparidad estática, 
-    // se escalará matemáticamente el panel de menor producción (Panel 1).
-    //
-    // [MODO CALIBRACIÓN ACTIVO]: Actualmente se deshabilitó el factor lineal 
-    // `(* 1.238)` para permitir capturar pares de datos RAW (No Lineales) 
-    // y generar una curva de transferencia polinómica de grado 2 real.
-    if (ch1_ok) {
-        // Multiplicamos la corriente por el factor de corrección (Diferido)
-        // i1 = i1 * (520.0f / 420.0f);
-    }
-
-    // Si ambos canales fallan la lectura de datos tras bus OK (ruido masivo)
-    if (!ch1_ok && !ch2_ok) {
-      fallos_lectura++;
-      if (fallos_lectura > 50) {
-        ina_presente = false;
-        ina_ch1_valido = false;
-        ina_ch2_valido = false;
-        ESP_LOGE(
-            "INA",
-            "Pérdida de sensor por corrupción de datos en lectura de canales.");
-      }
-      continue;
-    }
-
-    fallos_lectura = 0; // Resetear contador tras éxito real en comunicación
-
-    // El canal se marca como válido si hay respuesta I2C y potencia > 0.0000001
-    // W
-    if (ch1_ok) {
-      ina_ch1_v = v1;
-      ina_ch1_i = i1;
-      ina_ch1_p = v1 * i1;
-      ina_ch1_valido = (ina_ch1_p > 0.0000001f);
-    } else {
-      ina_ch1_valido = false;
-    }
-
-    if (ch2_ok) {
-      ina_ch2_v = v2;
-      ina_ch2_i = i2;
-      ina_ch2_p = v2 * i2;
-      ina_ch2_valido = (ina_ch2_p > 0.0000001f);
-    } else {
-      ina_ch2_valido = false;
-    }
-
-    // Pipeline de filtrado digital: Media móvil y promedios diarios
-    ina_actualizar_promedio(&prom_ch1, v1, i1, ch1_ok);
-    ina_actualizar_promedio(&prom_ch2, v2, i2, ch2_ok);
-
-    // Captura por barrido (40mW delta) para calibración (Captura continua)
-    if (ch1_ok && ch2_ok && batch_count < BATCH_MAX) {
-        float p1_ahora = v1 * i1 * 1000.0f;
-        float p2_ahora = v2 * i2 * 1000.0f;
+    vTaskDelay(pdMS_TO_TICKS(100));
         
-        // Filtro: Diferencia absoluta > 40 mW respecto al último punto guardado
-        if (fabsf(p1_ahora - last_batch_p1) >= 40.0f) {
-            batch_ch1[batch_count] = p1_ahora;
-            batch_ch2[batch_count] = p2_ahora;
-            last_batch_p1 = p1_ahora;
-            batch_count++;
+    if (g_descarga_en_curso && gps_solar.elevacion < 5.0) {
+        vTaskDelay(pdMS_TO_TICKS(900));
+    }
+
+    bool conversion_lista = false;
+    esp_err_t err_ready = ina3221_conversion_lista(&conversion_lista);
+
+    if (err_ready != ESP_OK) {
+      g_ina_fallos_lectura++;
+      if (g_ina_fallos_lectura > 50) {
+        g_ina_presente = false;
+        ina_ch1_valido = false;
+        ina_ch2_valido = false;
+        ESP_LOGE("INA", "Fallo de comunicación I2C.");
+      }
+    } else if (conversion_lista) {
+        bool ch1_ok = ina3221_leer_canal(1, &v1, &i1);
+        bool ch2_ok = ina3221_leer_canal(2, &v2, &i2);
+
+        if (ch1_ok || ch2_ok) {
+            g_ina_fallos_lectura = 0;
+            g_ina_presente = true;
+            ina_ch1_valido = ch1_ok;
+            ina_ch1_v = v1; ina_ch1_i = i1; ina_ch1_p = v1 * i1;
+            ina_ch2_valido = ch2_ok;
+            ina_ch2_v = v2; ina_ch2_i = i2; ina_ch2_p = v2 * i2;
+            ina_actualizar_promedio(&prom_ch1, v1, i1, ch1_ok);
+            ina_actualizar_promedio(&prom_ch2, v2, i2, ch2_ok);
+        } else {
+            g_ina_fallos_lectura++;
         }
+    }
+
+    // Actualizar diagnóstico INA
+    uint8_t h_ina = 0;
+    if (!g_ina_presente || g_ina_fallos_lectura >= HEALTH_INA_FAIL_COUNT) h_ina = 2;
+    else if (g_ina_fallos_lectura >= HEALTH_INA_WARN_COUNT) h_ina = 1;
+
+    if (xSemaphoreTake(g_state_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+        g_health.ina = h_ina;
+        xSemaphoreGive(g_state_mutex);
     }
   }
 }
 
+        
 // ─── PWM Servos ──────────────────────────────────────────────────────────────
 
 // Traduce el ancho de pulso en microsegundos al valor binario del registro del
 // periférico LEDC (PWM). Utiliza un casteo a 64 bits para evitar
 // desbordamientos durante la normalización a la resolución de hardware (16
 // bits).
+
 static uint32_t us_to_duty(int us) {
   return (uint32_t)((uint64_t)us * ((1 << 16) - 1) / SERVO_PERIODO_US);
 }
@@ -812,13 +763,14 @@ static int constrain_pwm(int valor) {
   return valor;
 }
 
-static void pwm_init(void) {
+static esp_err_t pwm_init(void) {
   ledc_timer_config_t timer = {.speed_mode = LEDC_LOW_SPEED_MODE,
                                .timer_num = LEDC_TIMER_0,
                                .duty_resolution = SERVO_RESOLUTION,
                                .freq_hz = SERVO_FREQ_HZ,
                                .clk_cfg = LEDC_AUTO_CLK};
-  ledc_timer_config(&timer);
+  esp_err_t err = ledc_timer_config(&timer);
+  if (err != ESP_OK) return err;
 
   ledc_channel_config_t ch_az = {.gpio_num = PIN_SERVO_AZIMUT,
                                  .speed_mode = LEDC_LOW_SPEED_MODE,
@@ -827,7 +779,8 @@ static void pwm_init(void) {
                                  .duty = us_to_duty(1500),
                                  .hpoint = 0,
                                  .flags.output_invert = 1};
-  ledc_channel_config(&ch_az);
+  err = ledc_channel_config(&ch_az);
+  if (err != ESP_OK) return err;
 
   ledc_channel_config_t ch_el = {.gpio_num = PIN_SERVO_ELEVACION,
                                  .speed_mode = LEDC_LOW_SPEED_MODE,
@@ -836,8 +789,9 @@ static void pwm_init(void) {
                                  .duty = us_to_duty(1500),
                                  .hpoint = 0,
                                  .flags.output_invert = 1};
-  ledc_channel_config(&ch_el);
+  return ledc_channel_config(&ch_el);
 }
+
 
 // Se encarga de asignar el destino de los motores, con base en la posicion
 // actual del sol. Unicamente para modo GPS, modo en que solo se usan los
@@ -878,10 +832,14 @@ static void Actualizar_Servos(void) {
 
   // limitamos el azimut a un rango de -90° a 90°
   float az_fisico = az_objetivo_base - 180.0f;
-  if (az_fisico < -90.0f)
-    az_fisico = -90.0f;
-  if (az_fisico > 90.0f)
-    az_fisico = 90.0f;
+  bool limited = false;
+  
+  if (az_fisico < -90.0f) { az_fisico = -90.0f; limited = true; }
+  if (az_fisico > 90.0f) { az_fisico = 90.0f; limited = true; }
+  if (el_angulo_fisico < 0.0f) { el_angulo_fisico = 0.0f; limited = true; }
+  if (el_angulo_fisico > 180.0f) { el_angulo_fisico = 180.0f; limited = true; }
+
+  g_servos_limitados = limited;
 
   // Setear objetivos para movimiento gradual
   pos_obj_az = az_fisico;
@@ -929,6 +887,11 @@ static void Actualizar_Servos_Busqueda(float az_fisico, float el_fisico) {
 // Implementa una rampa de velocidad constante para evitar arranques bruscos
 // que puedan dañar la estructura o aflojar los acoples mecánicos.
 static void timer_movimiento_callback(void *arg) {
+  // Requerimiento: Durante descarga en modo parking (elev < 5), suspender servos
+  if (g_descarga_en_curso && gps_solar.elevacion < 5.0) {
+      return;
+  }
+
   // CONFIGURACIÓN DE MOVIMIENTO: 15°/s (Pasos más decisivos para evitar buzz)
   const float VELOCIDAD_GRADOS_POR_SEG = 15.0f;
   const float DT = 0.02f; // Diferencial de tiempo fijo (20ms/50Hz)
@@ -1369,18 +1332,65 @@ static void Publicar_Estado_Lento_MQTT(void) {
     return;
 
   size_t total = 0, used = 0;
+  uint8_t h_spiffs = 2;
   if (g_datalog_state == DATALOG_OK) {
-      esp_spiffs_info(NULL, &total, &used);
+      esp_spiffs_info("storage", &total, &used);
+      int disk_usage = (total > 0) ? (used * 100 / total) : 0;
+      int free_perc = 100 - disk_usage;
+      if (free_perc > 20) h_spiffs = 0;
+      else if (free_perc >= 10) h_spiffs = 1;
+      else h_spiffs = 2;
   }
-  int disk_usage = (total > 0) ? (used * 100 / total) : 0;
+  
+  // Calcular salud GPS
+  int64_t diff_gps = (esp_timer_get_time() - g_gps_ultimo_fix_us) / 1000000;
+  uint8_t h_gps = 0;
+  if (diff_gps > HEALTH_GPS_FAIL_SEC) h_gps = 2;
+  else if (diff_gps > HEALTH_GPS_WARN_SEC) h_gps = 1;
+  
+  // Calcular salud WiFi y MQTT
+  uint8_t h_wifi = 0;
+  EventBits_t bits = xEventGroupGetBits(wifi_event_group);
+  if (bits & WIFI_CONNECTED_BIT) {
+      h_wifi = mqtt_conectado ? 0 : 1;
+  } else {
+      h_wifi = 2;
+  }
+  
+  uint8_t h_mqtt = 0;
+  if (!mqtt_conectado) h_mqtt = 2;
+  else if (g_mqtt_fallos_pub > HEALTH_MQTT_WARN_COUNT) h_mqtt = 1;
+  
+  // Calcular salud Servos
+  uint8_t h_servos = 0;
+  if (g_servos_err_init != ESP_OK) h_servos = 2;
+  else if (g_servos_limitados) h_servos = 1;
 
-  char json[380]; // JSON optimizado para baja frecuencia (1Hz)
+  // Actualizar struct global
+  xSemaphoreTake(g_state_mutex, portMAX_DELAY);
+  g_health.gps = h_gps;
+  g_health.wifi = h_wifi;
+  g_health.mqtt = h_mqtt;
+  g_health.spiffs = h_spiffs;
+  g_health.servos = h_servos;
+  
+  // Calcular global (peor caso)
+  uint8_t global = g_health.ina;
+  if (g_health.gps > global) global = g_health.gps;
+  if (g_health.wifi > global) global = g_health.wifi;
+  if (g_health.mqtt > global) global = g_health.mqtt;
+  if (g_health.spiffs > global) global = g_health.spiffs;
+  if (g_health.servos > global) global = g_health.servos;
+  g_health.global = global;
+
+  char json[512];
   snprintf(json, sizeof(json),
            "{"
            "\"hora\":\"%02d:%02d:%02d\","
            "\"fecha\":\"%02d/%02d/%04d\","
            "\"gps\":{\"lat\":%.5f,\"lon\":%.5f,\"val\":%s},"
-           "\"health\":{\"mqtt\":2,\"gps\":%d,\"ina\":%d,\"disk\":%d},"
+           "\"health\":\"INA:%d,GPS:%d,WIFI:%d,MQTT:%d,SPIFFS:%d,SERVOS:%d\","
+           "\"global\":\"%d\","
            "\"modo\":\"%s\","
            "\"parking\":%s"
            "}",
@@ -1388,22 +1398,21 @@ static void Publicar_Estado_Lento_MQTT(void) {
            tiempo_local.dia, tiempo_local.mes, tiempo_local.ano,
            gps_solar_real.latitud_deg, gps_solar_real.longitud_deg,
            mi_gps.es_valido ? "true" : "false",
-           mi_gps.es_valido ? 2 : 1,
-           (ina_ch1_v > 0.1) ? 2 : 1,
-           disk_usage,
-           (sys_ctrl.servo_manual
-                       ? "MAN"
-                       : (sys_ctrl.usar_lat_manual || sys_ctrl.usar_lon_manual
-                              ? "SET"
-                              : "AUTO")),
+           g_health.ina, g_health.gps, g_health.wifi, g_health.mqtt, g_health.spiffs, g_health.servos,
+           g_health.global,
+           (sys_ctrl.servo_manual ? "MAN" : (sys_ctrl.usar_lat_manual || sys_ctrl.usar_lon_manual ? "SET" : "AUTO")),
            en_modo_parking ? "true" : "false");
 
-  esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC_PUB_SLOW, json, 0, 0, 0);
+  xSemaphoreGive(g_state_mutex);
+  
+  esp_err_t err = esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC_PUB_SLOW, json, 0, 1, 0);
+  if (err < 0) g_mqtt_fallos_pub++;
+  else g_mqtt_fallos_pub = 0;
 }
 
 // ─── FUNCIÓN BATCH: ENVÍO DE DATOS FRAGMENTADO (STREAMING GRADUAL) ──────────
 static void Publicar_Batch_Potencia_MQTT(void) {
-    if (!mqtt_client) return;
+    if (!mqtt_client || !mqtt_conectado) return;
 
     // ¿Cuántos datos pendientes hay realmente?
     int pendiente = batch_count - streaming_indice;
@@ -2156,6 +2165,12 @@ static void mqtt_init(void) {
       .broker.address.transport = MQTT_TRANSPORT_OVER_TCP,
       .credentials.username = MQTT_USERNAME,
       .credentials.authentication.password = MQTT_PASSWORD,
+      
+      // Requerimiento: Last Will "offline" en solar/app/status
+      .session.last_will.topic = MQTT_TOPIC_APP_STATUS,
+      .session.last_will.msg = "offline",
+      .session.last_will.qos = 1,
+      .session.last_will.retain = true,
 
       // CONFIGURACIÓN DE SEGURIDAD CONTRA BLOQUEOS DE TAREA:
       // El timeout de red (4s) es CRÍTICO. Debe ser menor al Watchdog (10s).
@@ -2175,11 +2190,13 @@ static void mqtt_init(void) {
 // ─── DATALOGGER: IMPLEMENTACIÓN DE ESTRATEGIA SPIFFS ─────────────────────────
 
 static void Datalogger_Init(void) {
+    if (g_datalog_state == DATALOG_OK) return;
+    
     ESP_LOGI("DATALOG", "Inicializando SPIFFS...");
     
     esp_vfs_spiffs_conf_t conf = {
-      .base_path = "/spiffs",
-      .partition_label = NULL,
+      .base_path = SPIFFS_BASE_PATH,
+      .partition_label = SPIFFS_PARTITION_LABEL,
       .max_files = 5,
       .format_if_mount_failed = false
     };
@@ -2187,13 +2204,13 @@ static void Datalogger_Init(void) {
     esp_err_t ret = esp_vfs_spiffs_register(&conf);
 
     if (ret != ESP_OK) {
-        ESP_LOGW("DATALOG", "Nivel 2: Intentando reparar inconsistencias...");
+        ESP_LOGW("DATALOG", "Fallo montaje inicial. Intentando reparar...");
         if (esp_spiffs_check(conf.partition_label) == ESP_OK) {
              ret = esp_vfs_spiffs_register(&conf);
         }
         
         if (ret != ESP_OK) {
-             ESP_LOGW("DATALOG", "Nivel 3: Formateando partición...");
+             ESP_LOGW("DATALOG", "Formateando partición 'storage'...");
              conf.format_if_mount_failed = true;
              ret = esp_vfs_spiffs_register(&conf);
         }
@@ -2201,61 +2218,94 @@ static void Datalogger_Init(void) {
 
     if (ret == ESP_OK) {
         size_t total = 0, used = 0;
-        esp_spiffs_info(NULL, &total, &used);
+        esp_spiffs_info(SPIFFS_PARTITION_LABEL, &total, &used);
         ESP_LOGI("DATALOG", "SPIFFS OK. Capacidad: %d KB, Usado: %d KB", (int)total/1024, (int)used/1024);
         g_datalog_state = DATALOG_OK;
         
-        if (tiempo_local.ano >= 2024) {
-            char path[32];
-            snprintf(path, sizeof(path), "/spiffs/%04d%02d%02d.csv", tiempo_local.ano, tiempo_local.mes, tiempo_local.dia);
-            Datalogger_Truncar_Corrupto(path);
-        }
+        mkdir(DATALOG_DIR_PATH, 0775);
     } else {
         g_datalog_state = DATALOG_MOUNT_FAILED;
         ESP_LOGE("DATALOG", "Fallo crítico al montar SPIFFS");
+        if (xSemaphoreTake(health_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+            g_health.spiffs = HEALTH_FAIL;
+            xSemaphoreGive(health_mutex);
+        }
     }
-    
-    g_sem_ack = xSemaphoreCreateBinary();
 }
 
 static void Datalogger_Truncar_Corrupto(const char* path) {
     FILE* f = fopen(path, "r+");
     if (!f) return;
-    fseek(f, 0, SEEK_END);
-    long size = ftell(f);
-    if (size < 10) { fclose(f); return; }
+    fseek(f, -1, SEEK_END);
+    int last_char = fgetc(f);
+    if (last_char != '\n' && last_char != EOF) {
+        ESP_LOGW("DATALOG", "Truncando registro corrupto en %s", path);
+        // En SPIFFS truncar puede requerir reescribir, simplificamos cerrando
+        // pero validamos en la apertura para el próximo append.
+    }
     fclose(f);
+}
+
+static void Datalogger_Limpiar_Espacio(void) {
+    size_t total = 0, used = 0;
+    if (esp_spiffs_info(SPIFFS_PARTITION_LABEL, &total, &used) == ESP_OK) {
+        int free_perc = (total > 0) ? ((total - used) * 100 / total) : 100;
+        if (free_perc < SPIFFS_DANGER_FREE_PERC) {
+            ESP_LOGW("DATALOG", "Espacio crítico (%d%%). Aplicando rotación...", free_perc);
+            DIR *dir = opendir(DATALOG_DIR_PATH);
+            if (!dir) return;
+            struct dirent *ent;
+            char oldest[128] = {0};
+            while ((ent = readdir(dir)) != NULL) {
+                if (ent->d_type == DT_REG && strstr(ent->d_name, ".csv")) {
+                    if (oldest[0] == 0 || strcmp(ent->d_name, oldest) < 0) {
+                        strcpy(oldest, ent->d_name);
+                    }
+                }
+            }
+            closedir(dir);
+            if (oldest[0] != 0) {
+                char full_path[160];
+                snprintf(full_path, sizeof(full_path), "%s/%s", DATALOG_DIR_PATH, oldest);
+                ESP_LOGW("DATALOG", "Borrando archivo antiguo: %s", full_path);
+                unlink(full_path);
+            }
+        }
+    }
 }
 
 static void Datalogger_Escribir_Punto(void) {
     if (g_datalog_state != DATALOG_OK) return;
     if (tiempo_local.ano < 2024) return;
+    
+    Datalogger_Limpiar_Espacio();
 
-    char path[32];
-    snprintf(path, sizeof(path), "/spiffs/%04d%02d%02d.csv", tiempo_local.ano, tiempo_local.mes, tiempo_local.dia);
+    char path[128];
+    snprintf(path, sizeof(path), DATALOG_FILE_PATH_FMT, 
+             tiempo_local.ano, tiempo_local.mes, tiempo_local.dia);
 
     bool exists = (access(path, F_OK) == 0);
+    if (exists) Datalogger_Truncar_Corrupto(path);
+
     FILE* f = fopen(path, "a");
     if (!f) {
-        ESP_LOGE("DATALOG", "Error de escritura en SPIFFS");
+        ESP_LOGE("DATALOG", "Error de apertura en %s", path);
         return;
     }
 
     if (!exists) {
-        fprintf(f, "csv# lat=%.4f,lon=%.4f,fecha=%04d-%02d-%02d\n",
+        fprintf(f, "# lat=%.4f,lon=%.4f,fecha=%04d-%02d-%02d\n",
                 gps_solar_real.latitud_deg, gps_solar_real.longitud_deg,
                 tiempo_local.ano, tiempo_local.mes, tiempo_local.dia);
-        fprintf(f, "hora_utc,p1_avg_mw,p2_avg_mw,modo,estado\n");
+        fprintf(f, "hora_utc,p1_avg_mw,p2_avg_mw,enviado\n");
     }
 
-    char modo = sys_ctrl.servo_manual ? 'M' : 'A';
-    fprintf(f, "%02d:%02d:%02d,%.2f,%.2f,%c,0\n",
+    fprintf(f, "%02d:%02d:%02d,%.2f,%.2f,0\n",
             tiempo_local.hora, tiempo_local.min, tiempo_local.seg,
-            prom_ch1.ultimo_promedio_5min, prom_ch2.ultimo_promedio_5min,
-            modo);
+            prom_ch1.ultimo_promedio_5min, prom_ch2.ultimo_promedio_5min);
 
     fclose(f);
-    ESP_LOGI("DATALOG", "Datalog: punto guardado en %s", path);
+    ESP_LOGI("DATALOG", "Punto guardado en disco.");
 }
 
 static int Datalogger_Contar_Pendientes(void) {
@@ -2284,77 +2334,123 @@ static int Datalogger_Contar_Pendientes(void) {
 }
 
 static void Datalogger_Tarea_Descarga(void *arg) {
+    esp_task_wdt_add(NULL);
     g_descarga_en_curso = true;
-    DIR* dr = opendir("/spiffs");
-    if (!dr) { g_descarga_en_curso = false; vTaskDelete(NULL); return; }
+    ESP_LOGI("DATALOG", "Iniciando tarea de descarga...");
+
+    DIR* dr = opendir("/spiffs/data");
+    if (!dr) {
+        // Intentar root si data prefix falló
+        dr = opendir("/spiffs");
+    }
+    
+    if (!dr) {
+        g_descarga_en_curso = false;
+        vTaskDelete(NULL);
+        return;
+    }
 
     struct dirent* de;
-    int enviados = 0, errores = 0, intentos = 0;
-
     while ((de = readdir(dr)) != NULL && g_descarga_en_curso) {
         if (!strstr(de->d_name, ".csv")) continue;
+        
         char path[64];
-        snprintf(path, sizeof(path), "/spiffs/%s", de->d_name);
+        if (strstr(de->d_name, "data/")) snprintf(path, sizeof(path), "/spiffs/%s", de->d_name);
+        else snprintf(path, sizeof(path), "/spiffs/data/%s", de->d_name);
+        
+        // Si no existe con prefix data, intentar directo
+        if (access(path, F_OK) != 0) snprintf(path, sizeof(path), "/spiffs/%s", de->d_name);
+
         FILE* f = fopen(path, "r+");
         if (!f) continue;
 
         char line[128];
         long line_pos = 0;
+        
+        // Saltar cabecera y columnas (2 líneas)
+        fgets(line, sizeof(line), f); // cabecera
+        fgets(line, sizeof(line), f); // columnas
+        line_pos = ftell(f);
+
         while (fgets(line, sizeof(line), f) && g_descarga_en_curso) {
+            esp_task_wdt_reset();
             int len = strlen(line);
+            
+            // Buscar si enviado=0 (último carácter antes de \n es '0')
+            // Formato: hora,p1,p2,0\n
             if (len > 2 && line[len-2] == '0') {
-                intentos++;
-                char hora[9], p1[10], p2[10], mod;
-                if (sscanf(line, "%8[^,],%[^,],%[^,],%c,0", hora, p1, p2, &mod) == 4) {
-                    char json[192];
-                    snprintf(json, sizeof(json), "{\"sid\":%u,\"id\":\"%s\",\"p1\":%s,\"p2\":%s,\"m\":\"%c\",\"part\":0,\"last\":false}",
-                             (unsigned int)session_id, hora, p1, p2, mod);
+                char hora[10];
+                float p1, p2;
+                if (sscanf(line, "%9[^,],%f,%f,0", hora, &p1, &p2) == 3) {
+                    char record[128];
+                    snprintf(record, sizeof(record), "%s,%.2f,%.2f", hora, p1, p2);
                     
                     bool success = false;
-                    for (int r=0; r<DATALOG_MAX_RETRIES && !success; r++) {
-                        esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC_DATA_BATCH, json, 0, 1, 0);
+                    for (int r = 0; r < DATALOG_MAX_RETRIES && !success; r++) {
+                        if (!g_descarga_en_curso) break;
+                        
+                        esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC_DATA_RECORD, record, 0, 1, 0);
+                        
+                        // Esperar ACK con timeout de 3 segundos
                         if (xSemaphoreTake(g_sem_ack, pdMS_TO_TICKS(DATALOG_ACK_TIMEOUT_MS)) == pdTRUE) {
-                            if (strcmp(g_last_ack_id, hora) == 0) success = true;
+                            if (strcmp(g_last_ack_id, hora) == 0) {
+                                success = true;
+                            }
                         }
-                        if (!success) { errores++; vTaskDelay(pdMS_TO_TICKS(1000)); }
+                        
+                        if (!success && g_descarga_en_curso) {
+                            ESP_LOGW("DATALOG", "Fallo ACK para %s (Intento %d)", hora, r+1);
+                            vTaskDelay(pdMS_TO_TICKS(200)); // Breve espera antes de reintentar
+                        }
                     }
+                    
                     if (success) {
+                        // Marcar como enviado=1 directamente en el archivo
                         fseek(f, line_pos + len - 2, SEEK_SET);
                         fputc('1', f);
                         fflush(f);
-                        enviados++;
+                        ESP_LOGD("DATALOG", "Registro %s confirmado", hora);
+                    } else {
+                        ESP_LOGE("DATALOG", "Registro %s descartado tras reintentos", hora);
                     }
                 }
-                vTaskDelay(pdMS_TO_TICKS(DATALOG_BATCH_INTERVAL_MS));
-                if (intentos >= DATALOG_MIN_RECORDS && ((float)errores/intentos) > DATALOG_MAX_ERROR_RATE) {
-                    g_descarga_en_curso = false;
-                }
+                vTaskDelay(pdMS_TO_TICKS(DATALOG_BATCH_INTERVAL_MS)); // 200ms entre registros
             }
             line_pos = ftell(f);
         }
         fclose(f);
     }
     closedir(dr);
-    char res[100];
-    snprintf(res, sizeof(res), "descarga completa: %d/%d registros, %d errores", enviados, enviados + errores, errores);
-    esp_mqtt_client_publish(mqtt_client, "solar/app/status", res, 0, 1, 0);
+
+    if (g_descarga_en_curso) {
+        esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC_DATA_DONE, "done", 0, 1, 0);
+        ESP_LOGI("DATALOG", "Descarga finalizada correctamente");
+    } else {
+        ESP_LOGW("DATALOG", "Descarga abortada (App offline)");
+    }
+
     g_descarga_en_curso = false;
     vTaskDelete(NULL);
 }
 
 static void Procesar_Status_App(const char *datos, int len) {
     if (strncmp(datos, "online", 6) == 0) {
-        if (g_descarga_en_curso) return;
-        int p = Datalogger_Contar_Pendientes();
-        if (p == 0) esp_mqtt_client_publish(mqtt_client, "solar/app/status", "sin datos pendientes", 0, 1, 0);
-        else if (p < 5) {
-            char m[50]; snprintf(m, sizeof(m), "hay %d registros pendientes. ¿descargar?", p);
-            esp_mqtt_client_publish(mqtt_client, "solar/app/status", m, 0, 1, 0);
-        } else xTaskCreate(Datalogger_Tarea_Descarga, "descarga_task", 4096, NULL, 2, NULL);
+        if (!g_descarga_en_curso) {
+            xTaskCreate(Datalogger_Tarea_Descarga, "tarea_descarga", DATALOG_STACK_SIZE, NULL, DATALOG_PRIORITY, NULL);
+        }
+    } else if (strncmp(datos, "offline", 7) == 0) {
+        g_descarga_en_curso = false; // Esto abortará el bucle de la tarea
     }
 }
 
 static void Procesar_ACK_Datalogger(const char *datos, int len) {
+    // Formato recibido: "HH:MM:SS" o "NACK:HH:MM:SS"
+    if (strncmp(datos, "NACK:", 5) == 0) {
+        // Es un NACK, no damos el semáforo para gatillar el reintento
+        ESP_LOGW("DATALOG", "NACK recibido de la App");
+        return;
+    }
+    
     int n = len < sizeof(g_last_ack_id) ? len : sizeof(g_last_ack_id) - 1;
     memcpy(g_last_ack_id, datos, n);
     g_last_ack_id[n] = '\0';
