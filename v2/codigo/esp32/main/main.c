@@ -737,7 +737,7 @@ static void tarea_medicion_ina(void *arg) {
     ina_actualizar_promedio(&prom_ch1, v1, i1, ch1_ok);
     ina_actualizar_promedio(&prom_ch2, v2, i2, ch2_ok);
 
-    // Captura por barrido (40mW delta) para calibración (BATCH 256)
+    // Captura por barrido (25mW delta) para calibración (BATCH 150)
     if (ch1_ok && ch2_ok && batch_count < BATCH_SIZE) {
         float p1_ahora = v1 * i1 * 1000.0f;
         float p2_ahora = v2 * i2 * 1000.0f;
@@ -1451,7 +1451,7 @@ static void Publicar_Batch_Potencia_MQTT(void) {
     esp_mqtt_client_publish(mqtt_client, "solar/data/batch", json_buff, 0, 1, 0);
     free(json_buff);
     
-    // Opcionalmente podemos resetear el contador tras envío
+    // Reseteamos el contador tras el envío para permitir un nuevo ciclo de captura
     batch_count = 0; 
     last_batch_p1 = -100.0f;
 }
@@ -1582,8 +1582,6 @@ static void Procesar_Comando_MQTT(const char *datos, int len) {
   // 3. COMANDO: GET_TEMP (Trigger para descarga del Batch de Calibración)
   else if (strncmp(cmd_ptr, "get_temp", 8) == 0) {
     Publicar_Batch_Potencia_MQTT();
-    batch_count = 0; // Resetear tras envío manual
-    last_batch_p1 = -100.0f;
     ESP_LOGI(TAG, "MQTT: Solicitud de batch procesada.");
   }
   // 4. COMANDOS: FIJAR UBICACIÓN VIRTUAL (TESTING EN INTERIORES)
