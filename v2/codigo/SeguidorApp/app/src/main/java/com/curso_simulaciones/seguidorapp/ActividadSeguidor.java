@@ -110,7 +110,8 @@ public class ActividadSeguidor extends Activity implements Runnable {
                 AlmacenDatosRAM.resetStats(); 
                 cliente.conectar();
                 ui.botonConectar.setEnabled(false);
-                ui.botonConectar.setText("Conectando...");
+                AlmacenDatosRAM.conectado_PubSub = "CONECTANDO...";
+                connectionStartTime = System.currentTimeMillis();
             } else {
                 cliente.desconectar();
                 AlmacenDatosRAM.conectado = false;
@@ -134,8 +135,13 @@ public class ActividadSeguidor extends Activity implements Runnable {
         });
 
         ui.botonResetGPS.setOnClickListener(v -> {
-            sincronizarControles();
-            publicarComando("reset", 0, false);
+            // Requerimiento: NO cambiar el modo, solo enviar coordenadas
+            float lat = AlmacenDatosRAM.lat;
+            float lon = AlmacenDatosRAM.lon;
+            
+            publicarComando("set_lat", lat, true);
+            publicarComando("set_lon", lon, true);
+            
             Snackbar.make(findViewById(android.R.id.content), "GPS sincronizado ✓", Snackbar.LENGTH_SHORT).show();
         });
 
@@ -253,7 +259,7 @@ public class ActividadSeguidor extends Activity implements Runnable {
 
         ui.botonTemp.setOnClickListener(v -> {
             if (AlmacenDatosRAM.conectado) {
-                AlmacenDatosRAM.registrosDatalogger.clear();
+                AlmacenDatosRAM.recordsList.clear();
                 ui.botonShare.setEnabled(false);
                 ui.progressDownload.setVisibility(View.VISIBLE);
                 ui.progressDownload.setProgress(0);
@@ -267,65 +273,74 @@ public class ActividadSeguidor extends Activity implements Runnable {
     }
 
     private void generarYCompartirCSV() {
-        if (AlmacenDatosRAM.registrosDatalogger.isEmpty()) {
-            AlmacenDatosRAM.conectado_PubSub = "No hay registros acumulados";
+        if (AlmacenDatosRAM.recordsList.isEmpty()) {
+            Snackbar.make(findViewById(android.R.id.content), "No hay datos para compartir", Snackbar.LENGTH_SHORT).show();
             return;
         }
 
         try {
-            // Nombre del archivo basado en la fecha del sistema
-            String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
-            File cacheDir = getExternalCacheDir();
-            File file = new File(cacheDir, "SolarTracker_Export_" + timestamp + ".csv");
+            // Nombre especificado: SolarTracker_YYYY-MM-DD.csv
+            String fechaIso = AlmacenDatosRAM.fecha.replace("/", "-");
+            if (fechaIso.contains("-")) {
+                // Supone formato DD-MM-YYYY -> transformar a YYYY-MM-DD si es necesario o usar el del ESP32
+                // El ESP32 manda YYYY-MM-DD. 
+            }
+            String nombreArchivo = "SolarTracker_" + AlmacenDatosRAM.fecha + ".csv";
+            
+            File cacheDir = getCacheDir(); // Interno, sin permisos externos
+            File file = new File(cacheDir, nombreArchivo);
             
             FileOutputStream out = new FileOutputStream(file);
             
-            // Cabecera con lat, lon y fecha (tomados de la RAM actual)
-            String header = "# lat=" + AlmacenDatosRAM.lat + ",lon=" + AlmacenDatosRAM.lon + 
-                           ",fecha=" + AlmacenDatosRAM.fecha + "\n";
-            header += "hora_utc,p1_mw,p2_mw\n";
+            // 3. Incluir cabecera extraída del último mensaje de solar/status/slow
+            String header = AlmacenDatosRAM.lastSlowPayloadHeader + "\n";
+            header += "hora_utc,p1_avg_mw,p2_avg_mw\n";
             out.write(header.getBytes());
 
-            for (String registro : AlmacenDatosRAM.registrosDatalogger) {
-                out.write((registro + "\n").getBytes());
+            synchronized(AlmacenDatosRAM.recordsList) {
+                for (AlmacenDatosRAM.DataRecord r : AlmacenDatosRAM.recordsList) {
+                    String line = String.format(Locale.getDefault(), "%s,%.2f,%.2f\n", r.horaUtc, r.p1AvgMw, r.p2AvgMw);
+                    out.write(line.getBytes());
+                }
             }
             out.close();
 
             Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", file);
             Intent intent = new Intent(Intent.ACTION_SEND);
             intent.setType("text/csv");
-            intent.putExtra(Intent.EXTRA_SUBJECT, "Backup SolarTracker " + AlmacenDatosRAM.fecha);
             intent.putExtra(Intent.EXTRA_STREAM, uri);
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            startActivity(Intent.createChooser(intent, "Compartir CSV..."));
+            startActivity(Intent.createChooser(intent, "Compartir datos SolarTracker"));
 
         } catch (Exception e) {
             Log.e("ActividadSeguidor", "Error al generar CSV", e);
-            AlmacenDatosRAM.conectado_PubSub = "Error exportación: " + e.getMessage();
+            Snackbar.make(findViewById(android.R.id.content), "Error exportación: " + e.getMessage(), Snackbar.LENGTH_LONG).show();
         }
     }
 
     private void finalizarDescarga() {
-        if (AlmacenDatosRAM.registrosDatalogger.isEmpty()) return;
+        if (AlmacenDatosRAM.recordsList.isEmpty()) return;
 
         ui.botonShare.setEnabled(true);
         ui.progressDownload.setVisibility(View.GONE);
         ui.labelDownloadCount.setVisibility(View.GONE);
         
         // Calcular resumen
-        int total = AlmacenDatosRAM.registrosDatalogger.size();
-        String hInicio = AlmacenDatosRAM.registrosDatalogger.get(0).split(",")[0];
-        String hFin = AlmacenDatosRAM.registrosDatalogger.get(total - 1).split(",")[0];
-        
+        int total = AlmacenDatosRAM.recordsList.size();
+        String hInicio, hFin;
         float maxP1 = 0, maxP2 = 0;
-        for (String r : AlmacenDatosRAM.registrosDatalogger) {
-            String[] p = r.split(",");
-            maxP1 = Math.max(maxP1, Float.parseFloat(p[1]));
-            maxP2 = Math.max(maxP2, Float.parseFloat(p[2]));
+        
+        synchronized(AlmacenDatosRAM.recordsList) {
+            hInicio = AlmacenDatosRAM.recordsList.get(0).horaUtc;
+            hFin = AlmacenDatosRAM.recordsList.get(total - 1).horaUtc;
+            for (AlmacenDatosRAM.DataRecord r : AlmacenDatosRAM.recordsList) {
+                maxP1 = Math.max(maxP1, r.p1AvgMw);
+                maxP2 = Math.max(maxP2, r.p2AvgMw);
+            }
         }
 
         String resumen = String.format(Locale.getDefault(), 
-            "Descarga completada: %d registros [%s - %s]. P1 max: %.0fmW, P2 max: %.0fmW",
+            "Descarga completa: %d registros, %s – %s\nP1 máx: %.0f mW, P2 máx: %.0f mW",
             total, hInicio, hFin, maxP1, maxP2);
 
         Snackbar.make(findViewById(android.R.id.content), resumen, Snackbar.LENGTH_LONG).show();
@@ -345,19 +360,23 @@ public class ActividadSeguidor extends Activity implements Runnable {
         long elapsed = System.currentTimeMillis() - lastCmdTime.get(key);
         float target = lastTargetVal.get(key);
         
-        // Si el valor actual coincide con el objetivo (tolerancia 0.15)
-        if (Math.abs(currentVal - target) < 0.15f) {
+        // Requerimiento: Tolerancia +- 2 grados
+        if (Math.abs(currentVal - target) <= 2.0f) {
             label.setText("✓");
             label.setTextColor(ui.COLOR_HEALTH_OK);
-            // Desaparecer después de 2 segundos
-            if (elapsed > 2000) label.setVisibility(View.GONE);
+            // Desaparecer después de 1 segundo (según req)
+            if (elapsed > 1000) label.setVisibility(View.GONE);
         } else {
             if (elapsed > CMD_CONFIRM_TIMEOUT) {
                 label.setText("Sin respuesta");
-                label.setTextColor(ui.COLOR_HEALTH_CRIT);
-            } else if (elapsed > CMD_SENDING_UI_MS) {
+                label.setTextColor(Color.parseColor("#E65100")); // Naranja
+            } else {
                 label.setText("Enviando...");
                 label.setTextColor(Color.GRAY);
+                // Si pasaron menos de 800ms, mostrar "Enviando..."
+                if (elapsed > CMD_SENDING_UI_MS) {
+                    // Mantener texto pero quizás cambiar color o desvanecer?
+                }
             }
         }
     }
@@ -374,14 +393,14 @@ public class ActividadSeguidor extends Activity implements Runnable {
         title.setPadding(0, 0, 0, 30);
         root.addView(title);
 
-        String[] nombres = {"BROKER MQTT", "SISTEMA GPS", "SENSOR INA", "RED WIFI", "SERVOMOTORES", "SPIFFS / DISK"};
-        int[] healths = {AlmacenDatosRAM.health_mqtt, AlmacenDatosRAM.health_gps, AlmacenDatosRAM.health_ina, 
-                        AlmacenDatosRAM.health_wifi, AlmacenDatosRAM.health_servos, AlmacenDatosRAM.health_disk};
-        long[] tss = {AlmacenDatosRAM.ts_mqtt, AlmacenDatosRAM.ts_gps, AlmacenDatosRAM.ts_ina, 
-                     AlmacenDatosRAM.ts_wifi, AlmacenDatosRAM.ts_servos, AlmacenDatosRAM.ts_disk};
+        String[] nombres = {"INA3221", "GPS", "WiFi", "MQTT", "SPIFFS", "Servos"};
+        int[] healths = {AlmacenDatosRAM.currentHealth.ina, AlmacenDatosRAM.currentHealth.gps, 
+                        AlmacenDatosRAM.currentHealth.wifi, AlmacenDatosRAM.currentHealth.mqtt, 
+                        AlmacenDatosRAM.currentHealth.spiffs, AlmacenDatosRAM.currentHealth.servos};
+        long globalTs = AlmacenDatosRAM.currentHealth.timestampMs;
 
         for (int i = 0; i < nombres.length; i++) {
-            root.addView(crearFilaEstado(nombres[i], healths[i], tss[i]));
+            root.addView(crearFilaEstado(nombres[i], healths[i], globalTs));
         }
 
         dial.setContentView(root);
@@ -421,11 +440,11 @@ public class ActividadSeguidor extends Activity implements Runnable {
         
         gd.setColor(color);
         circle.setBackground(gd);
-        row.addView(circle, new LinearLayout.LayoutParams(dpToPx(14), dpToPx(14)));
+        row.addView(circle, new LinearLayout.LayoutParams(dpToPx(18), dpToPx(18)));
 
         TextView tv = new TextView(this);
         String sAge = obsoleta ? "Sin datos" : "Hace " + diff + "s";
-        tv.setText(String.format("  %-12s | %-10s | %s", nombre, statusText, sAge));
+        tv.setText(String.format("  %-10s | %-12s | %s", nombre, statusText, sAge));
         tv.setTextSize(14);
         tv.setTypeface(android.graphics.Typeface.MONOSPACE);
         row.addView(tv);
@@ -569,15 +588,13 @@ public class ActividadSeguidor extends Activity implements Runnable {
 
         float eAz = AlmacenDatosRAM.servo_az - AlmacenDatosRAM.sol_az;
         float eEl = AlmacenDatosRAM.servo_el - AlmacenDatosRAM.sol_el;
-        if (eAz > 180)
-            eAz -= 360;
-        if (eAz < -180)
-            eAz += 360; // Normalización Azimut
+        if (eAz > 180) eAz -= 360;
+        if (eAz < -180) eAz += 360; 
 
         ui.errAz.setText(String.format("%+.1f°", eAz));
         ui.errEl.setText(String.format("%+.1f°", eEl));
-        ui.errAz.setTextColor(Math.abs(eAz) > 1.0 ? ui.COLOR_ERROR : ui.COLOR_ACCENT);
-        ui.errEl.setTextColor(Math.abs(eEl) > 1.0 ? ui.COLOR_ERROR : ui.COLOR_ACCENT);
+        ui.errAz.setTextColor(Math.abs(eAz) > 1.0 ? Color.RED : ui.COLOR_CONTROL_ACCENT);
+        ui.errEl.setTextColor(Math.abs(eEl) > 1.0 ? Color.RED : ui.COLOR_CONTROL_ACCENT);
 
         // --- 2. BALANCE ENERGÉTICO ---
         ui.p1Inst.setText(String.format("%.2f", AlmacenDatosRAM.p1_inst));
@@ -589,47 +606,18 @@ public class ActividadSeguidor extends Activity implements Runnable {
 
         if (AlmacenDatosRAM.p2_avg_dia > 0.1f) {
             float g = ((AlmacenDatosRAM.p1_avg_dia / AlmacenDatosRAM.p2_avg_dia) - 1) * 100;
-            ui.labelGanancia.setText(String.format("%+.1f%%", g));
             ui.actualizarGananciaColor(g);
         } else {
-            ui.labelGanancia.setText("--- %");
             ui.actualizarGananciaColor(0);
         }
 
-        // --- 3. HEALTH DASHBOARD ---
-        if (!AlmacenDatosRAM.conectado) {
-            ui.actualizarEstadoGlobal(-1, "DESCONECTADO");
-        } else {
-            // Verificar si el dato global está obsoleto (>5s)
-            long diffGlobal = (System.currentTimeMillis() - AlmacenDatosRAM.ts_mqtt) / 1000;
-            if (diffGlobal > 5) {
-                ui.actualizarEstadoGlobal(-1, "SIN DATOS");
-            } else {
-                int global = AlmacenDatosRAM.health_global;
-                String status = (global == 0) ? "OPERANDO" : (global == 1 ? "ADVERTENCIA" : "FALLA");
-                ui.actualizarEstadoGlobal(global, status);
-            }
-        }
-        
-        // --- 3.1 ALERTA DE DEGRADACIÓN ---
-        if (AlmacenDatosRAM.conectado_PubSub.startsWith("DEG:")) {
-            String comp = AlmacenDatosRAM.conectado_PubSub.substring(4);
-            AlmacenDatosRAM.conectado_PubSub = "Monitoreo activo";
-            Snackbar sb = Snackbar.make(findViewById(android.R.id.content), 
-                "⚠️ ALERTA: Falla en " + comp, Snackbar.LENGTH_LONG);
-            sb.setBackgroundTint(ui.COLOR_HEALTH_CRIT);
-            sb.show();
-        }
-
-
-        // --- 4. FEEDBACK DE CONTROLES ---
+        // --- 3. FEEDBACK DE CONTROLES ---
         long dt = System.currentTimeMillis() - lastManualInteractionTime;
         if (!intervencionGPS && dt > MANUAL_LOCKOUT_MS) {
             ui.sliderLat.setProgress(Math.round(AlmacenDatosRAM.lat * 100 + 9000));
             ui.sliderLon.setProgress(Math.round(AlmacenDatosRAM.lon * 100 + 18000));
         }
         
-        // Feedback dinámico de comandos
         actualizarFeedback("lat", AlmacenDatosRAM.lat, ui.feedLat);
         actualizarFeedback("lon", AlmacenDatosRAM.lon, ui.feedLon);
         actualizarFeedback("ser_az", AlmacenDatosRAM.servo_az, ui.feedAz);
@@ -642,27 +630,73 @@ public class ActividadSeguidor extends Activity implements Runnable {
             actualizarEstadoModo(AlmacenDatosRAM.modo.equals("AUTO"));
         }
 
-        // --- 5. ESTADO DE DESCARGA ---
+        // --- 4. ESTADO DE DESCARGA ---
         if (ui.progressDownload.getVisibility() == View.VISIBLE) {
-            int count = AlmacenDatosRAM.registrosDatalogger.size();
-            ui.labelDownloadCount.setText(count + " registros recibidos");
-            // Indeterminado hasta que llegue solar/data/done
+            int count = AlmacenDatosRAM.recordsList.size();
+            ui.labelDownloadCount.setText(count + " registros");
         }
 
-        ui.textviewFechaHora.setText(AlmacenDatosRAM.fecha + " " + AlmacenDatosRAM.hora);
-        ui.textviewAviso.setText(AlmacenDatosRAM.conectado_PubSub);
-        
+        // --- 5. ESTADO DE CONEXIÓN Y BARRA SUPERIOR ---
         if (!AlmacenDatosRAM.conectado) {
-            if (ui.botonConectar.getText().equals("Conectando...")) {
-                 // Sigue intentando
+            lastGlobalState = 0; 
+            if (AlmacenDatosRAM.conectado_PubSub.equals("CONECTANDO...")) {
+                ui.botonConectar.setText(""); 
+                ui.botonConectar.setEnabled(false);
+                ui.progressConectando.setVisibility(View.VISIBLE);
+                ui.actualizarEstadoGlobal(-1, "CONECTANDO...");
             } else {
                 ui.botonConectar.setText("CONECTAR");
                 ui.botonConectar.setEnabled(true);
+                ui.botonConectar.getBackground().setColorFilter(ui.COLOR_CONTROL_ACCENT, PorterDuff.Mode.MULTIPLY);
+                ui.progressConectando.setVisibility(View.GONE);
+                ui.actualizarEstadoGlobal(-1, "DESCONECTADO");
             }
         } else {
             ui.botonConectar.setText("DESCONECTAR");
             ui.botonConectar.setEnabled(true);
+            ui.botonConectar.getBackground().setColorFilter(ui.COLOR_HEALTH_CRIT, PorterDuff.Mode.MULTIPLY);
+            ui.progressConectando.setVisibility(View.GONE);
+
+            long diffGlobal = (System.currentTimeMillis() - AlmacenDatosRAM.currentHealth.timestampMs) / 1000;
+            if (diffGlobal > 5) {
+                ui.actualizarEstadoGlobal(-1, "SIN SEÑAL");
+            } else {
+                int previousGlobal = lastGlobalState;
+                int currentGlobal = AlmacenDatosRAM.health_global;
+                String statusText = (currentGlobal == 0) ? "OPERANDO" : (currentGlobal == 1 ? "ADVERTENCIA" : "FALLA");
+                ui.actualizarEstadoGlobal(currentGlobal, statusText);
+                
+                if (currentGlobal > previousGlobal && currentGlobal > 0) {
+                     if (System.currentTimeMillis() - connectionStartTime > 3000) {
+                         mostrarAlertaDegradacion();
+                     }
+                }
+                lastGlobalState = currentGlobal;
+            }
         }
+
+        ui.textviewFechaHora.setText(AlmacenDatosRAM.fecha + " " + AlmacenDatosRAM.hora);
+        ui.textviewAviso.setText(AlmacenDatosRAM.conectado_PubSub);
+    }
+
+    private int lastGlobalState = 0;
+    private long connectionStartTime = 0;
+
+    private void mostrarAlertaDegradacion() {
+        String comp = "SISTEMA";
+        AlmacenDatosRAM.HealthStatus h = AlmacenDatosRAM.currentHealth;
+        if (h.servos > 0) comp = "Servos fuera de rango";
+        else if (h.gps > 0) comp = "GPS sin fix válido";
+        else if (h.ina > 0) comp = "Sensor INA3221";
+        else if (h.wifi > 0) comp = "Interferencia WiFi";
+        else if (h.mqtt > 0) comp = "Latencia MQTT";
+        else if (h.spiffs > 1) comp = "SPIFFS (Falla Disco)";
+
+        String msg = (AlmacenDatosRAM.health_global == 2 ? "Falla: " : "Advertencia: ") + comp;
+        Snackbar sb = Snackbar.make(findViewById(android.R.id.content), msg, Snackbar.LENGTH_LONG);
+        sb.setBackgroundTint(AlmacenDatosRAM.health_global == 2 ? ui.COLOR_HEALTH_CRIT : ui.COLOR_HEALTH_WARN);
+        sb.show();
+    }
     }
 
     @Override

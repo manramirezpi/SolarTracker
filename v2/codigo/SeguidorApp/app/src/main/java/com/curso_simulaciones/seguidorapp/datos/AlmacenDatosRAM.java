@@ -1,6 +1,8 @@
 package com.curso_simulaciones.seguidorapp.datos;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 public class AlmacenDatosRAM {
 
@@ -17,6 +19,7 @@ public class AlmacenDatosRAM {
     public static String topicSubRecord = "solar/data/record";
     public static String topicSubDone = "solar/data/done";
     public static String topicAppStatus = "solar/app/status";
+    public static String topicEspStatus = "solar/esp32/status";
     public static String topicPub = "solar/cmd";
     public static String topicPubAck = "solar/data/ack";
 
@@ -40,24 +43,59 @@ public class AlmacenDatosRAM {
     public static volatile boolean gps_valido = false;
 
     // --- ESTADOS DE SALUD (HEALTH SYSTEM v2.5) ---
-    // 0: Falla/Desconectado, 1: Advertencia/Ocupado, 2: Operando/Ok
-    public static volatile int health_mqtt = 0;
-    public static volatile int health_gps = 0;
-    public static volatile int health_ina = 0;
-    public static volatile int health_wifi = 0;
-    public static volatile int health_servos = 0;
-    public static volatile int health_disk = 0; // % de ocupación o estado datalogger
-    public static volatile int health_global = 2; // Arreglo para v2.5
+    public static class HealthStatus {
+        public int ina, gps, wifi, mqtt, spiffs, servos, global;
+        public long timestampMs;
 
-    // Timestamps para el monitoreo de tiempo desde la última actualización
-    public static volatile long ts_mqtt = 0;
-    public static volatile long ts_gps = 0;
-    public static volatile long ts_ina = 0;
-    public static volatile long ts_wifi = 0;
-    public static volatile long ts_servos = 0;
-    public static volatile long ts_disk = 0;
+        public HealthStatus() {
+            ina = gps = wifi = mqtt = spiffs = servos = global = -1; // -1: Desconocido
+            timestampMs = 0;
+        }
+    }
 
-    public static volatile String pendingAckId = null; // ID pendiente de confirmar (ACK)
+    public static volatile HealthStatus currentHealth = new HealthStatus();
+
+    // 0: OK, 1: WARN, 2: FAIL
+    public static volatile int health_mqtt = -1;
+    public static volatile int health_gps = -1;
+    public static volatile int health_ina = -1;
+    public static volatile int health_wifi = -1;
+    public static volatile int health_servos = -1;
+    public static volatile int health_disk = -1; 
+    public static volatile int health_global = -1; 
+
+    public static volatile long ts_mqtt = 0, ts_gps = 0, ts_ina = 0, ts_wifi = 0, ts_servos = 0, ts_disk = 0;
+
+    // --- DATALOGGER CLASES Y DATOS ---
+    public static class DataRecord {
+        public String horaUtc;
+        public float p1AvgMw;
+        public float p2AvgMw;
+
+        public DataRecord(String h, float p1, float p2) {
+            this.horaUtc = h;
+            this.p1AvgMw = p1;
+            this.p2AvgMw = p2;
+        }
+        
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            DataRecord that = (DataRecord) o;
+            return horaUtc.equals(that.horaUtc);
+        }
+
+        @Override
+        public int hashCode() {
+            return horaUtc.hashCode();
+        }
+    }
+
+    public static List<DataRecord> recordsList = Collections.synchronizedList(new ArrayList<>());
+    public static volatile String lastSlowPayloadHeader = ""; // Para metadatos en CSV
+    
+    public static volatile String pendingAckId = null; 
 
     // Fecha y Hora
     public static volatile String fecha = "--/--/----";
@@ -77,7 +115,6 @@ public class AlmacenDatosRAM {
     public static final int MAX_HISTORICO = 100; // Ventana de ~20s para suavizado reactivo
 
     // Optimización "Ultimate": Búfer Circular con arrays primitivos
-    // Evita el boxing de Float y el desplazamiento de memoria O(n)
     public static float[] historico_p1 = new float[MAX_HISTORICO];
     public static float[] historico_p2 = new float[MAX_HISTORICO];
     public static int indexP1 = 0, countP1 = 0;

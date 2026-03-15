@@ -32,11 +32,11 @@ public class GeneradorUI {
 
     public TextView labelLat, labelLon, labelManualAz, labelManualEl;
     public TextView solAz, solEl, servoAz, servoEl, errAz, errEl;
-    public TextView p1Inst, p1Avg, p1Daily, p2Inst, p2Avg, p2Daily, labelGanancia;
+    public TextView p1Inst, p1Avg, p1Daily, p2Inst, p2Avg, p2Daily, p1Gain, p2Gain;
     public Button btnAuto, btnMan;
     public View healthIndicator;
     public TextView healthStatusText;
-    public ProgressBar progressDownload;
+    public ProgressBar progressDownload, progressConectando;
     public TextView labelDownloadCount;
     
     // Labels de feedback para comandos
@@ -60,6 +60,9 @@ public class GeneradorUI {
     public final int COLOR_GAIN_POS_BG = Color.parseColor("#E8F5E9");
     public final int COLOR_GAIN_NEG_TXT = Color.parseColor("#C62828");
     public final int COLOR_GAIN_NEG_BG = Color.parseColor("#FFEBEE");
+
+    public final int COLOR_TOPBAR_BG = Color.parseColor("#EEEEEE");
+    public final int COLOR_TOPBAR_TXT = Color.parseColor("#1565C0");
 
     public SeekBar sliderLat, sliderLon, sliderManualAz, sliderManualEl;
 
@@ -85,8 +88,7 @@ public class GeneradorUI {
         // --- Datos de Potencia ---
         p1Inst = configDato("--"); p1Avg = configDato("--"); p1Daily = configDato("--");
         p2Inst = configDato("--"); p2Avg = configDato("--"); p2Daily = configDato("--");
-        labelGanancia = configDato("--");
-        labelGanancia.setTextColor(COLOR_ACCENT);
+        p1Gain = configDato("--"); p2Gain = configDato("--");
 
         // --- Controles de Ubicación ---
         sliderLat = configSeekBar(0, 18000, 9000);
@@ -138,17 +140,25 @@ public class GeneradorUI {
 
         // Icono de Salud Global
         healthIndicator = new View(actividad);
+        healthIndicator.setLayoutParams(new LinearLayout.LayoutParams(dp(24), dp(24)));
+        
         healthStatusText = new TextView(actividad);
-        healthStatusText.setText("DESCONECTADO");
-        healthStatusText.setTextSize(12);
-        healthStatusText.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
-        healthStatusText.setPadding(dp(8), 0, 0, 0);
+        healthStatusText.setText("SIN SEÑAL");
+        healthStatusText.setTextSize(14);
+        healthStatusText.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        healthStatusText.setPadding(dp(8), 0, dp(16), 0);
 
-        // Barra de descarga
-        progressDownload = new ProgressBar(actividad, null, android.R.attr.progressBarStyleHorizontal);
+        // Barra de descarga (ahora circular indeterminada)
+        progressDownload = new ProgressBar(actividad, null, android.R.attr.progressBarStyleSmall);
+        progressDownload.setIndeterminate(true);
         progressDownload.setVisibility(View.GONE);
-        labelDownloadCount = configLabel("0 registros recibidos");
+        labelDownloadCount = new TextView(actividad);
+        labelDownloadCount.setTextSize(12);
+        labelDownloadCount.setTextColor(COLOR_TEXTO_SEC);
         labelDownloadCount.setVisibility(View.GONE);
+        
+        progressConectando = new ProgressBar(actividad, null, android.R.attr.progressBarStyleSmall);
+        progressConectando.setVisibility(View.GONE);
         
         // Feedback de comandos
         feedLat = configFeedback(); feedLon = configFeedback();
@@ -175,6 +185,25 @@ public class GeneradorUI {
         healthIndicator.setBackground(gd);
         healthStatusText.setText(text);
         healthStatusText.setTextColor(color);
+        
+        // Actualizar barra superior si está conectado
+        if (AlmacenDatosRAM.conectado) {
+            View parent = (View) healthIndicator.getParent().getParent();
+            if (parent != null) {
+                parent.setBackgroundColor(Color.parseColor("#F5F5F5")); // Fondo base de topBar
+                // Opcionalmente, el requerimiento dice: "barra superior con color según estado de salud global"
+                // Pero esto podría ser muy molesto si toda la barra se vuelve roja. 
+                // Revisando: "CONECTADO: botón cambia a 'Desconectar', barra superior con color según estado de salud global"
+                // Probablemente se refiere a un color teñido sutilmente o solo el indicador.
+                // Usaré un tinte suave en el fondo de la barra si es FAIL.
+                if (state == 2) parent.setBackgroundColor(Color.parseColor("#FFEBEE"));
+                else if (state == 1) parent.setBackgroundColor(Color.parseColor("#FFF9C4"));
+                else parent.setBackgroundColor(COLOR_TOPBAR_BG);
+            }
+        } else {
+             View parent = (View) healthIndicator.getParent().getParent();
+             if (parent != null) parent.setBackgroundColor(COLOR_TOPBAR_BG);
+        }
     }
 
 
@@ -227,47 +256,53 @@ public class GeneradorUI {
         LinearLayout main = new LinearLayout(actividad);
         main.setOrientation(LinearLayout.VERTICAL);
         main.setBackgroundColor(COLOR_FONDO);
-        main.setPadding(dp(16), dp(16), dp(16), dp(16));
 
-        // --- HEADER ---
-        LinearLayout header = new LinearLayout(actividad);
-        header.setGravity(Gravity.CENTER_VERTICAL);
+        // --- TOP BAR (HEADER) ---
+        LinearLayout topBar = new LinearLayout(actividad);
+        topBar.setOrientation(LinearLayout.HORIZONTAL);
+        topBar.setGravity(Gravity.CENTER_VERTICAL);
+        topBar.setBackgroundColor(COLOR_TOPBAR_BG);
+        topBar.setPadding(dp(16), dp(8), dp(16), dp(8));
         
         TextView title = new TextView(actividad);
-        title.setText("SOLAR TRACKER MONITOR");
-        title.setTextSize(14);
+        title.setText("SOLAR TRACKER");
+        title.setTextSize(16);
         title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        title.setTextColor(COLOR_TEXTO_PRI);
-        header.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+        title.setTextColor(COLOR_TOPBAR_TXT);
+        topBar.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
         
         LinearLayout healthBox = new LinearLayout(actividad);
         healthBox.setGravity(Gravity.CENTER_VERTICAL);
-        healthBox.addView(healthIndicator, new LinearLayout.LayoutParams(dp(22), dp(22)));
+        healthBox.addView(healthIndicator);
         healthBox.addView(healthStatusText);
-        header.addView(healthBox);
-        main.addView(header);
+        topBar.addView(healthBox);
         
-        main.addView(gapV(16));
+        // ProgressBar de descarga (indeterminado)
+        topBar.addView(progressDownload, new LinearLayout.LayoutParams(dp(40), dp(24)));
+        topBar.addView(labelDownloadCount);
+        
+        main.addView(topBar);
+        
+        // --- CONTENT AREA ---
+        LinearLayout content = new LinearLayout(actividad);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(16), dp(16), dp(16), dp(16));
 
         // --- ZONA DE MONITOREO (FONDO BLANCO) ---
-        main.addView(crearTablaTracking());
-        main.addView(gapV(24));
-        main.addView(crearTablaPotencia());
-        main.addView(gapV(24));
+        content.addView(crearTablaTracking());
+        content.addView(gapV(24));
+        content.addView(crearTablaPotencia());
+        content.addView(gapV(24));
 
         // --- ZONA DE CONTROL (FONDO GRIS + BORDE AZUL) ---
-        main.addView(crearZonaControl());
+        content.addView(crearZonaControl());
         
-        main.addView(gapV(16));
-        
-        // --- BARRA DE DESCARGA ---
-        main.addView(labelDownloadCount);
-        main.addView(progressDownload);
-        main.addView(gapV(16));
+        main.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
 
         // --- FOOTER ---
         LinearLayout footer = new LinearLayout(actividad);
         footer.setGravity(Gravity.CENTER_VERTICAL);
+        footer.setPadding(dp(16), dp(8), dp(16), dp(16));
         
         LinearLayout footerInfo = new LinearLayout(actividad);
         footerInfo.setOrientation(LinearLayout.VERTICAL);
@@ -279,7 +314,14 @@ public class GeneradorUI {
         footer.addView(gapH(8));
         footer.addView(botonTemp);
         footer.addView(gapH(8));
-        footer.addView(botonConectar);
+        
+        FrameLayout btnLayout = new FrameLayout(actividad);
+        btnLayout.addView(botonConectar);
+        FrameLayout.LayoutParams lpProg = new FrameLayout.LayoutParams(dp(24), dp(24));
+        lpProg.gravity = Gravity.CENTER;
+        btnLayout.addView(progressConectando, lpProg);
+        
+        footer.addView(btnLayout);
         
         main.addView(footer);
         return main;
@@ -348,54 +390,63 @@ public class GeneradorUI {
     private LinearLayout crearTablaPotencia() {
         LinearLayout l = new LinearLayout(actividad);
         l.setOrientation(LinearLayout.VERTICAL);
-        l.addView(crearFila("RENDIMIENTO METROLÓGICO", "Tracker", "Estático", "", true));
+        l.addView(crearFila("RENDIMIENTO METROLÓGICO", "Inst", "Prom", "Acum", "Gan", true));
         l.addView(gapV(8));
-        l.addView(crearFila("Instantánea", p1Inst, p2Inst, null));
-        l.addView(crearFila("Promedio", p1Avg, p2Avg, null));
-        l.addView(crearFila("Diaria (mWh)", p1Daily, p2Daily, null));
-        
-        LinearLayout gainBox = new LinearLayout(actividad);
-        gainBox.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-        TextView t = new TextView(actividad); 
-        t.setText("Ganancia Neta: "); 
-        t.setTextColor(COLOR_TEXTO_SEC);
-        t.setTextSize(14);
-        gainBox.addView(t);
-        labelGanancia.setTextSize(16);
-        gainBox.addView(labelGanancia);
-        l.addView(gapV(8));
-        l.addView(gainBox);
+        l.addView(crearFila("Panel Seguidor", p1Inst, p1Avg, p1Daily, p1Gain));
+        l.addView(crearFila("Panel Estático", p2Inst, p2Avg, p2Daily, p2Gain));
         return l;
     }
 
-    private LinearLayout crearFila(String label, Object c1, Object c2, Object c3, boolean title) {
+    private LinearLayout crearFila(String label, Object c1, Object c2, Object c3, Object c4) {
         LinearLayout r = new LinearLayout(actividad);
-        r.setWeightSum(10);
+        r.setWeightSum(12);
         
         TextView tLabel = new TextView(actividad);
         tLabel.setText(label);
-        tLabel.setTextColor(title ? COLOR_CONTROL_ACCENT : COLOR_TEXTO_SEC);
-        tLabel.setTextSize(title ? 11 : 13);
-        if (title) tLabel.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        tLabel.setTextColor(COLOR_TEXTO_SEC);
+        tLabel.setTextSize(13);
         r.addView(tLabel, new LinearLayout.LayoutParams(0, -2, 4));
 
-        Object[] cols = {c1, c2, c3};
+        Object[] cols = {c1, c2, c3, c4};
         for (Object col : cols) {
             if (col == null) {
-                View space = new View(actividad);
-                r.addView(space, new LinearLayout.LayoutParams(0, 1, 2));
+                r.addView(new View(actividad), new LinearLayout.LayoutParams(0, 1, 2));
                 continue;
             }
             if (col instanceof String) {
                 TextView tv = new TextView(actividad);
                 tv.setText((String)col);
                 tv.setTextColor(COLOR_TEXTO_SEC);
-                tv.setTextSize(11);
+                tv.setTextSize(10);
                 tv.setGravity(Gravity.CENTER);
                 r.addView(tv, new LinearLayout.LayoutParams(0, -2, 2));
             } else {
                 r.addView((View)col, new LinearLayout.LayoutParams(0, -2, 2));
             }
+        }
+        return r;
+    }
+    
+    // Método auxiliar para el título de la tabla
+    private LinearLayout crearFila(String label, String c1, String c2, String c3, String c4, boolean title) {
+        LinearLayout r = new LinearLayout(actividad);
+        r.setWeightSum(12);
+        
+        TextView tLabel = new TextView(actividad);
+        tLabel.setText(label);
+        tLabel.setTextColor(COLOR_CONTROL_ACCENT);
+        tLabel.setTextSize(11);
+        tLabel.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        r.addView(tLabel, new LinearLayout.LayoutParams(0, -2, 4));
+
+        String[] cols = {c1, c2, c3, c4};
+        for (String col : cols) {
+            TextView tv = new TextView(actividad);
+            tv.setText(col);
+            tv.setTextColor(COLOR_TEXTO_SEC);
+            tv.setTextSize(10);
+            tv.setGravity(Gravity.CENTER);
+            r.addView(tv, new LinearLayout.LayoutParams(0, -2, 2));
         }
         return r;
     }
@@ -449,14 +500,26 @@ public class GeneradorUI {
     
     public void actualizarGananciaColor(float ganancia) {
         if (ganancia > 0) {
-            labelGanancia.setTextColor(COLOR_GAIN_POS_TXT);
-            labelGanancia.setBackgroundColor(COLOR_GAIN_POS_BG);
+            p1Gain.setText(String.format("+%.1f%%", ganancia));
+            p1Gain.setTextColor(COLOR_GAIN_POS_TXT);
+            p1Gain.setBackgroundColor(COLOR_GAIN_POS_BG);
+            p2Gain.setText("---");
+            p2Gain.setTextColor(COLOR_TEXTO_SEC);
+            p2Gain.setBackgroundColor(Color.TRANSPARENT);
         } else if (ganancia < 0) {
-            labelGanancia.setTextColor(COLOR_GAIN_NEG_TXT);
-            labelGanancia.setBackgroundColor(COLOR_GAIN_NEG_BG);
+            p1Gain.setText(String.format("%.1f%%", ganancia));
+            p1Gain.setTextColor(COLOR_GAIN_NEG_TXT);
+            p1Gain.setBackgroundColor(COLOR_GAIN_NEG_BG);
+            p2Gain.setText("---");
+            p2Gain.setTextColor(COLOR_TEXTO_SEC);
+            p2Gain.setBackgroundColor(Color.TRANSPARENT);
         } else {
-            labelGanancia.setTextColor(COLOR_TEXTO_SEC);
-            labelGanancia.setBackgroundColor(Color.TRANSPARENT);
+            p1Gain.setText("---");
+            p1Gain.setTextColor(COLOR_TEXTO_SEC);
+            p1Gain.setBackgroundColor(Color.TRANSPARENT);
+            p2Gain.setText("---");
+            p2Gain.setTextColor(COLOR_TEXTO_SEC);
+            p2Gain.setBackgroundColor(Color.TRANSPARENT);
         }
     }
 

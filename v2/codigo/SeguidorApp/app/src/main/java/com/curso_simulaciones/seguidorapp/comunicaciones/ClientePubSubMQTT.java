@@ -48,12 +48,12 @@ public class ClientePubSubMQTT implements MqttCallback, IMqttActionListener {
         options.setPassword(AlmacenDatosRAM.PASSWORD.toCharArray());
         options.setCleanSession(true);
         options.setAutomaticReconnect(true);
-        // Requerimiento: Last Will "offline"
+        // Configuration of Last Will: Payload "offline" to topic solar/app/status
         options.setWill(AlmacenDatosRAM.topicAppStatus, "offline".getBytes(), 1, true);
 
         try {
             client.connect(options, null, this);
-            AlmacenDatosRAM.conectado_PubSub = "Conectando a " + AlmacenDatosRAM.MQTTHOST + "...";
+            AlmacenDatosRAM.conectado_PubSub = "CONECTANDO...";
         } catch (Exception e) {
             Log.e(TAG, "Error crítico al llamar connect()", e);
             AlmacenDatosRAM.conectado_PubSub = "Error: " + e.getMessage();
@@ -68,9 +68,11 @@ public class ClientePubSubMQTT implements MqttCallback, IMqttActionListener {
             client.subscribe(topicSubSlow, 0);
             client.subscribe(AlmacenDatosRAM.topicSubRecord, 1);
             client.subscribe(AlmacenDatosRAM.topicSubDone, 1);
+            client.subscribe(AlmacenDatosRAM.topicEspStatus, 1);
+            client.subscribe(AlmacenDatosRAM.topicPubAck, 1);
 
-            // Requerimiento: Notificar presencia "online" con retain=true
-            publicarOnline();
+            // Publicar presencia "online"
+            publicarPresencia("online");
 
             AlmacenDatosRAM.conectado_PubSub = "Monitoreo activado";
             AlmacenDatosRAM.conectado = true;
@@ -80,87 +82,74 @@ public class ClientePubSubMQTT implements MqttCallback, IMqttActionListener {
         }
     }
 
-    @Override
-    public void onFailure(IMqttToken asyncActionToken, Throwable exception) {
-        String errorMsg = "Falla de conexión: " + (exception != null ? exception.getMessage() : "Desconocido");
-        Log.e(TAG, errorMsg, exception);
-        AlmacenDatosRAM.conectado_PubSub = errorMsg;
-        AlmacenDatosRAM.conectado = false;
+    private void publicarPresencia(String status) {
+        if (client != null && client.isConnected()) {
+            try {
+                MqttMessage message = new MqttMessage(status.getBytes());
+                message.setQos(1);
+                message.setRetained(true);
+                client.publish(AlmacenDatosRAM.topicAppStatus, message);
+            } catch (Exception e) {
+                Log.e(TAG, "Error al publicar presencia: " + status, e);
+            }
+        }
     }
 
     @Override
     public void connectionLost(Throwable throwable) {
-        String errorMsg = "Conexión perdida: " + (throwable != null ? throwable.getMessage() : "Broker desconectado");
-        Log.e(TAG, errorMsg, throwable);
+        Log.w(TAG, "Conexión perdida. Paho intentará reconexión automática.");
         AlmacenDatosRAM.conectado = false;
-        AlmacenDatosRAM.conectado_PubSub = errorMsg;
+        AlmacenDatosRAM.conectado_PubSub = "RECONECTANDO...";
+    }
+
+    @Override
+    public void connectComplete(boolean reconnect, String serverURI) {
+        if (reconnect) {
+            Log.i(TAG, "Reconexión automática exitosa a " + serverURI);
+            publicarPresencia("online");
+            AlmacenDatosRAM.conectado = true;
+            AlmacenDatosRAM.conectado_PubSub = "Monitoreo activado";
+        }
     }
 
     @Override
     public synchronized void messageArrived(String topic, MqttMessage mqttMessage) throws Exception {
         String payload = new String(mqttMessage.getPayload());
-        Log.d(TAG, "Mensaje de " + topic + ": " + payload);
-        // Aceptamos cualquier dato de nuestros tópicos de suscripción
         if (topic.equals(topicSubFast) || topic.equals(topicSubSlow) || 
-            topic.equals(AlmacenDatosRAM.topicSubRecord) || topic.equals(AlmacenDatosRAM.topicSubDone)) {
+            topic.equals(AlmacenDatosRAM.topicSubRecord) || topic.equals(AlmacenDatosRAM.topicSubDone) ||
+            topic.equals(AlmacenDatosRAM.topicEspStatus)) {
             
-            // Si es telemetría normal, agregar a la cola
-            if (topic.equals(topicSubFast) || topic.equals(topicSubSlow)) {
-                colaMensajes.add(payload);
-                if (colaMensajes.size() > 50) colaMensajes.poll();
-            }
-            
-            // Procesamiento inmediato de descarga (hilo separado)
-            if (topic.equals(AlmacenDatosRAM.topicSubRecord) || topic.equals(AlmacenDatosRAM.topicSubDone)) {
-                 // Notificar a la UI o procesador
-                 // Agregamos a la cola para que Actividad lo procese en su hilo
-                 colaMensajes.add("TOPIC:" + topic + "|" + payload);
-            }
+            colaMensajes.add("TOPIC:" + topic + "|" + payload);
+            if (colaMensajes.size() > 100) colaMensajes.poll();
         }
     }
 
-    private void publicarOnline() {
+    public void publicar(String payload) {
+        publicar(topicPub, payload);
+    }
+
+    public void publicar(String topic, String payload) {
         if (client != null && client.isConnected()) {
             try {
-                MqttMessage message = new MqttMessage("online".getBytes());
+                MqttMessage message = new MqttMessage(payload.getBytes());
                 message.setQos(1);
-                message.setRetained(true);
-                client.publish(AlmacenDatosRAM.topicAppStatus, message);
+                client.publish(topic, message);
             } catch (Exception e) {
-                Log.e(TAG, "Error al publicar online", e);
+                Log.e(TAG, "Error al publicar: " + payload, e);
             }
         }
-    }
-
-    @Override
-    public void deliveryComplete(IMqttDeliveryToken token) {
     }
 
     public String leerString() {
         return colaMensajes.poll();
     }
 
-    public void publicar(String payload) {
-        publicar(null, payload);
-    }
-
-    public void publicar(String topic, String payload) {
-        if (AlmacenDatosRAM.conectado && client != null) {
-            try {
-                String targetTopic = (topic == null) ? topicPub : topic;
-                MqttMessage message = new MqttMessage();
-                message.setPayload(payload.getBytes());
-                message.setQos(0);
-                client.publish(targetTopic, message);
-            } catch (Exception e) {
-                Log.e(TAG, "Error al publicar en " + topic, e);
-            }
-        }
-    }
-
     public void desconectar() {
         try {
-            if (client != null) {
+            if (client != null && client.isConnected()) {
+                publicarPresencia("offline");
+                // Breve espera antes de cerrar el socket para asegurar que el mensaje sale
+                Thread.sleep(200);
                 client.disconnect();
             }
         } catch (Exception e) {

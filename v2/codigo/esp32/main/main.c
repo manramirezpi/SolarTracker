@@ -103,19 +103,19 @@ static int g_ina_fallos_lectura = 0;
 static bool g_ina_presente = false;
 
 health_state_t health_get_global(void) {
-    if (health_mutex == NULL) return HEALTH_OK;
-    if (xSemaphoreTake(health_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-        health_state_t worse = g_health.ina;
-        if (g_health.gps > worse) worse = g_health.gps;
-        if (g_health.wifi > worse) worse = g_health.wifi;
-        if (g_health.mqtt > worse) worse = g_health.mqtt;
-        if (g_health.spiffs > worse) worse = g_health.spiffs;
-        if (g_health.servos > worse) worse = g_health.servos;
-        g_health.global = worse;
-        xSemaphoreGive(health_mutex);
-        return worse;
-    }
-    return g_health.global;
+    if (!health_mutex) return HEALTH_OK;
+    if (xSemaphoreTake(health_mutex, pdMS_TO_TICKS(10)) != pdTRUE) return g_health.global;
+
+    health_state_t worse = g_health.ina;
+    if (g_health.gps > worse) worse = g_health.gps;
+    if (g_health.wifi > worse) worse = g_health.wifi;
+    if (g_health.mqtt > worse) worse = g_health.mqtt;
+    if (g_health.spiffs > worse) worse = g_health.spiffs;
+    if (g_health.servos > worse) worse = g_health.servos;
+    g_health.global = worse;
+    
+    xSemaphoreGive(health_mutex);
+    return worse;
 }
 
 // ─── Estructuras de datos ────────────────────────────────────────────────────
@@ -577,10 +577,34 @@ static void tarea_principal(void *arg) {
       ticks_sin_gps++;
     }
 
-    // 2. LÓGICA DE CONTROL Y MOVIMIENTO (SIEMPRE A 10Hz)
-    // Sincronización de modo: Si entramos a modo manual, capturamos posición
-    // actual para evitar saltos. Pero solo si no fue forzado por MQTT (evita
-    // carrera)
+    if (mqtt_conectado) {
+      if (ahora_us - ultimo_pub_rapido >= 100000LL) {
+        Publicar_Estado_Rapido_MQTT(); 
+        ultimo_pub_rapido = ahora_us;
+      }
+
+      if (ahora_us - ultimo_pub_lento >= 1000000LL) {
+        Publicar_Estado_Lento_MQTT(); 
+        ultimo_pub_lento = ahora_us;
+      }
+
+      if (ahora_us - ultimo_streaming_us >= 500000LL) {
+          bool hay_datos = (batch_count - streaming_indice >= CHUNK_SIZE);
+          if (hay_datos || streaming_manual_trigger || (batch_count >= BATCH_GOAL)) {
+              Publicar_Batch_Potencia_MQTT(); 
+              ultimo_streaming_us = ahora_us;
+          }
+      }
+    }
+    vTaskDelay(pdMS_TO_TICKS(10)); // Ceder CPU
+  }
+}
+
+static void tarea_seguimiento(void *arg) {
+  esp_task_wdt_add(NULL);
+  while (1) {
+    esp_task_wdt_reset();
+    
     if (sys_ctrl.servo_manual && !servo_manual_anterior) {
       sys_ctrl.ser_az_manual = pos_obj_az;
       sys_ctrl.ser_el_manual = pos_obj_el;
@@ -596,25 +620,21 @@ static void tarea_principal(void *arg) {
       gps_solar.utc_ano = tiempo_local.ano;
       gps_solar.utc_mes = tiempo_local.mes;
       gps_solar.utc_dia = tiempo_local.dia;
-      gps_solar.utc_hora = tiempo_local.hora - (int)(round(gps_solar.longitud_deg / 15.0)); // Inverso burdo para cálculo
-      // En realidad Calcular_Posicion_Solar debería directamente usar tiempo local si se adapta,
-      // pero mantendremos la compatibilidad con el motor actual.
+      gps_solar.utc_hora = tiempo_local.hora - tiempo_local.zona_horaria;
 
       bool tiene_ubicacion = (ultima_lat_valida != 0.0 || sys_ctrl.usar_lat_manual);
-      bool tiempo_sincronizado = (tiempo_local.ano >= 2024 || 
-                                 sys_ctrl.usar_fecha_manual);
+      bool tiempo_sincronizado = (tiempo_local.ano >= 2024 || sys_ctrl.usar_fecha_manual);
 
       if (en_modo_busqueda && tiene_ubicacion && tiempo_sincronizado) {
         en_modo_busqueda = false;
-        ESP_LOGI(TAG, "Integridad verificada (Manual o GPS). Saliendo de búsqueda...");
+        ESP_LOGI(TAG, "Integridad verificada. Saliendo de búsqueda...");
       }
 
       if (en_modo_busqueda || !tiempo_sincronizado) {
         int64_t t_ahora = esp_timer_get_time();
         if (t_ahora - ultimo_cambio_az > 10000000LL) {
           angulo_az_busqueda += 45.0f;
-          if (angulo_az_busqueda > 90.0f)
-            angulo_az_busqueda = -90.0f;
+          if (angulo_az_busqueda > 90.0f) angulo_az_busqueda = -90.0f;
           ultimo_cambio_az = t_ahora;
         }
         Actualizar_Servos_Busqueda(angulo_az_busqueda, 60.0f);
@@ -623,39 +643,7 @@ static void tarea_principal(void *arg) {
         Actualizar_Servos();
       }
     }
-
-    // 3. TELEMETRÍA MULTINIVEL (4Hz / 1Hz)
-    if (mqtt_conectado) {
-      if (ahora_us - ultimo_pub_rapido >= 250000LL) {
-        Publicar_Estado_Rapido_MQTT(); // Restaurado a 4Hz (250ms) para fluidez
-        ultimo_pub_rapido = ahora_us;
-      }
-
-      if (ahora_us - ultimo_pub_lento >= 1000000LL) {
-        Publicar_Estado_Lento_MQTT(); // Se dispara cada 1 segundo
-        ultimo_pub_lento = ahora_us;
-        ticks_sin_gps = 0; // Heartbeat
-      }
-
-      // 4. MOTOR DE STREAMING (ENVÍO GRADUAL / SEGMENTADO)
-      if (mqtt_conectado && (ahora_us - ultimo_streaming_us >= 500000LL)) {
-          bool hay_datos = (batch_count - streaming_indice >= CHUNK_SIZE);
-          bool meta_voluntaria = streaming_manual_trigger;
-          bool meta_automatica = (batch_count >= BATCH_GOAL);
-
-          // Si hay suficientes datos para una ráfaga, o se alcanzó la meta (automática o manual)
-          if (hay_datos || meta_voluntaria || meta_automatica) {
-              Publicar_Batch_Potencia_MQTT(); // Envía el siguiente fragmento
-              ultimo_streaming_us = ahora_us;
-          }
-      }
-    } else {
-      // Si no hay MQTT, el heartbeat se mide en ciclos de 100ms (50 = 5s)
-      if (ticks_sin_gps >= 50) {
-        ticks_sin_gps = 0;
-        ESP_LOGW(TAG, "Sistema operando en modo autónomo (Sin GPS/MQTT)");
-      }
-    }
+    vTaskDelay(pdMS_TO_TICKS(100)); // 10Hz
   }
 }
 
@@ -734,9 +722,9 @@ static void tarea_medicion_ina(void *arg) {
     if (!g_ina_presente || g_ina_fallos_lectura >= HEALTH_INA_FAIL_COUNT) h_ina = 2;
     else if (g_ina_fallos_lectura >= HEALTH_INA_WARN_COUNT) h_ina = 1;
 
-    if (xSemaphoreTake(g_state_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+    if (xSemaphoreTake(health_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
         g_health.ina = h_ina;
-        xSemaphoreGive(g_state_mutex);
+        xSemaphoreGive(health_mutex);
     }
   }
 }
@@ -850,14 +838,12 @@ static void Actualizar_Servos(void) {
 // az_fisico: -90° a 90° (ángulo físico del servo de azimut)
 // el_fisico: 0-180° (ángulo físico del servo de elevación) 90° apunta al cenit
 static void Actualizar_Servos_Manual(float az_fisico, float el_fisico) {
-  if (az_fisico < -90.0f)
-    az_fisico = -90.0f;
-  if (az_fisico > 90.0f)
-    az_fisico = 90.0f;
-  if (el_fisico < 0.0f)
-    el_fisico = 0.0f;
-  if (el_fisico > 180.0f)
-    el_fisico = 180.0f;
+  bool limited = false;
+  if (az_fisico < -90.0f) { az_fisico = -90.0f; limited = true; }
+  if (az_fisico > 90.0f)  { az_fisico = 90.0f;  limited = true; }
+  if (el_fisico < 0.0f)   { el_fisico = 0.0f;   limited = true; }
+  if (el_fisico > 180.0f) { el_fisico = 180.0f; limited = true; }
+  g_servos_limitados = limited;
 
   // Setear objetivos para movimiento gradual
   pos_obj_az = az_fisico;
@@ -868,14 +854,12 @@ static void Actualizar_Servos_Manual(float az_fisico, float el_fisico) {
 // az_fisico: -90° a 90° (ángulo físico del servo de azimut)
 // el_fisico: 0-180° (ángulo físico del servo de elevación)
 static void Actualizar_Servos_Busqueda(float az_fisico, float el_fisico) {
-  if (az_fisico < -90.0f)
-    az_fisico = -90.0f;
-  if (az_fisico > 90.0f)
-    az_fisico = 90.0f;
-  if (el_fisico < 0.0f)
-    el_fisico = 0.0f;
-  if (el_fisico > 180.0f)
-    el_fisico = 180.0f;
+  bool limited = false;
+  if (az_fisico < -90.0f) { az_fisico = -90.0f; limited = true; }
+  if (az_fisico > 90.0f)  { az_fisico = 90.0f;  limited = true; }
+  if (el_fisico < 0.0f)   { el_fisico = 0.0f;   limited = true; }
+  if (el_fisico > 180.0f) { el_fisico = 180.0f; limited = true; }
+  g_servos_limitados = limited;
 
   // Setear objetivos para movimiento gradual
   pos_obj_az = az_fisico;
@@ -1104,6 +1088,9 @@ static void Procesar_Ubicacion_GPS(void) {
 
   // Guardar en NVS con filtro de distancia (~22km)
   Guardar_Configuracion_NVS();
+  
+  // Registrar fix exitoso para el sistema de salud
+  g_gps_ultimo_fix_us = esp_timer_get_time();
 }
 
 // ─── Cálculo Solar ───────────────────────────────────────────────────────────
@@ -1367,7 +1354,7 @@ static void Publicar_Estado_Lento_MQTT(void) {
   else if (g_servos_limitados) h_servos = 1;
 
   // Actualizar struct global
-  xSemaphoreTake(g_state_mutex, portMAX_DELAY);
+  xSemaphoreTake(health_mutex, portMAX_DELAY);
   g_health.gps = h_gps;
   g_health.wifi = h_wifi;
   g_health.mqtt = h_mqtt;
@@ -1375,13 +1362,13 @@ static void Publicar_Estado_Lento_MQTT(void) {
   g_health.servos = h_servos;
   
   // Calcular global (peor caso)
-  uint8_t global = g_health.ina;
-  if (g_health.gps > global) global = g_health.gps;
-  if (g_health.wifi > global) global = g_health.wifi;
-  if (g_health.mqtt > global) global = g_health.mqtt;
-  if (g_health.spiffs > global) global = g_health.spiffs;
-  if (g_health.servos > global) global = g_health.servos;
-  g_health.global = global;
+  health_state_t worse = g_health.ina;
+  if (g_health.gps > worse) worse = g_health.gps;
+  if (g_health.wifi > worse) worse = g_health.wifi;
+  if (g_health.mqtt > worse) worse = g_health.mqtt;
+  if (g_health.spiffs > worse) worse = g_health.spiffs;
+  if (g_health.servos > worse) worse = g_health.servos;
+  g_health.global = worse;
 
   char json[512];
   snprintf(json, sizeof(json),
@@ -1389,8 +1376,7 @@ static void Publicar_Estado_Lento_MQTT(void) {
            "\"hora\":\"%02d:%02d:%02d\","
            "\"fecha\":\"%02d/%02d/%04d\","
            "\"gps\":{\"lat\":%.5f,\"lon\":%.5f,\"val\":%s},"
-           "\"health\":\"INA:%d,GPS:%d,WIFI:%d,MQTT:%d,SPIFFS:%d,SERVOS:%d\","
-           "\"global\":\"%d\","
+           "\"health\":\"INA:%d,GPS:%d,WIFI:%d,MQTT:%d,SPIFFS:%d,SERVOS:%d,GLOBAL:%d\","
            "\"modo\":\"%s\","
            "\"parking\":%s"
            "}",
@@ -1403,9 +1389,9 @@ static void Publicar_Estado_Lento_MQTT(void) {
            (sys_ctrl.servo_manual ? "MAN" : (sys_ctrl.usar_lat_manual || sys_ctrl.usar_lon_manual ? "SET" : "AUTO")),
            en_modo_parking ? "true" : "false");
 
-  xSemaphoreGive(g_state_mutex);
-  
   esp_err_t err = esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC_PUB_SLOW, json, 0, 1, 0);
+  xSemaphoreGive(health_mutex);
+  
   if (err < 0) g_mqtt_fallos_pub++;
   else g_mqtt_fallos_pub = 0;
 }
@@ -2111,7 +2097,8 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
     mqtt_conectado = true;
     ultimo_mqtt_connect_us = esp_timer_get_time();
     ESP_LOGI(TAG, "MQTT conectado");
-    esp_mqtt_client_subscribe(mqtt_client, MQTT_TOPIC_SUB, 1);
+    esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC_ESP_STATUS, "online", 0, 1, 1);
+    esp_mqtt_client_subscribe(mqtt_client, MQTT_TOPIC_SUB_CMD, 1);
     esp_mqtt_client_subscribe(mqtt_client, MQTT_TOPIC_APP_STATUS, 1);
     esp_mqtt_client_subscribe(mqtt_client, MQTT_TOPIC_DATA_ACK, 1);
     break;
@@ -2143,7 +2130,7 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
 
   case MQTT_EVENT_DATA:
     // RECEPCIÓN DE COMANDOS: Desvía el payload al parser de comandos remoto.
-    if (strncmp(event->topic, MQTT_TOPIC_SUB, event->topic_len) == 0) {
+    if (strncmp(event->topic, MQTT_TOPIC_SUB_CMD, event->topic_len) == 0) {
         Procesar_Comando_MQTT(event->data, event->data_len);
     } else if (strncmp(event->topic, MQTT_TOPIC_APP_STATUS, event->topic_len) == 0) {
         Procesar_Status_App(event->data, event->data_len);
@@ -2166,8 +2153,8 @@ static void mqtt_init(void) {
       .credentials.username = MQTT_USERNAME,
       .credentials.authentication.password = MQTT_PASSWORD,
       
-      // Requerimiento: Last Will "offline" en solar/app/status
-      .session.last_will.topic = MQTT_TOPIC_APP_STATUS,
+      // Requerimiento: Last Will "offline" en solar/esp32/status
+      .session.last_will.topic = MQTT_TOPIC_ESP_STATUS,
       .session.last_will.msg = "offline",
       .session.last_will.qos = 1,
       .session.last_will.retain = true,
@@ -2306,6 +2293,20 @@ static void Datalogger_Escribir_Punto(void) {
 
     fclose(f);
     ESP_LOGI("DATALOG", "Punto guardado en disco.");
+    
+    // Actualizar sistema de salud localmente tras la escritura
+    size_t total = 0, used = 0;
+    if (esp_spiffs_info(SPIFFS_PARTITION_LABEL, &total, &used) == ESP_OK) {
+        int free_perc = (total > 0) ? ((total - used) * 100 / total) : 100;
+        health_state_t hs = HEALTH_OK;
+        if (free_perc < 10) hs = HEALTH_FAIL;
+        else if (free_perc < 20) hs = HEALTH_WARN;
+        
+        if (xSemaphoreTake(health_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+            g_health.spiffs = hs;
+            xSemaphoreGive(health_mutex);
+        }
+    }
 }
 
 static int Datalogger_Contar_Pendientes(void) {
@@ -2336,6 +2337,15 @@ static int Datalogger_Contar_Pendientes(void) {
 static void Datalogger_Tarea_Descarga(void *arg) {
     esp_task_wdt_add(NULL);
     g_descarga_en_curso = true;
+    
+    // MODO PARKING: Si elevación < 5°, suspender servos para dar prioridad a radio/CPU
+    bool suspended = false;
+    if (gps_solar.elevacion < 5.0 && tarea_servos_h != NULL) {
+        vTaskSuspend(tarea_servos_h);
+        suspended = true;
+        ESP_LOGI("DATALOG", "Parking detectado. Tarea servos suspendida.");
+    }
+
     ESP_LOGI("DATALOG", "Iniciando tarea de descarga...");
 
     DIR* dr = opendir("/spiffs/data");
@@ -2391,16 +2401,17 @@ static void Datalogger_Tarea_Descarga(void *arg) {
                         
                         esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC_DATA_RECORD, record, 0, 1, 0);
                         
-                        // Esperar ACK con timeout de 3 segundos
-                        if (xSemaphoreTake(g_sem_ack, pdMS_TO_TICKS(DATALOG_ACK_TIMEOUT_MS)) == pdTRUE) {
-                            if (strcmp(g_last_ack_id, hora) == 0) {
+                        // Esperar ACK con timeout de 3 segundos usando la cola IPC
+                        char ack_payload[12];
+                        if (xQueueReceive(g_cola_ack, ack_payload, pdMS_TO_TICKS(DATALOG_ACK_TIMEOUT_MS)) == pdTRUE) {
+                            if (strcmp(ack_payload, hora) == 0) {
                                 success = true;
                             }
                         }
                         
                         if (!success && g_descarga_en_curso) {
                             ESP_LOGW("DATALOG", "Fallo ACK para %s (Intento %d)", hora, r+1);
-                            vTaskDelay(pdMS_TO_TICKS(200)); // Breve espera antes de reintentar
+                            vTaskDelay(pdMS_TO_TICKS(200)); 
                         }
                     }
                     
@@ -2429,7 +2440,13 @@ static void Datalogger_Tarea_Descarga(void *arg) {
         ESP_LOGW("DATALOG", "Descarga abortada (App offline)");
     }
 
+    if (suspended && tarea_servos_h != NULL) {
+        vTaskResume(tarea_servos_h);
+        ESP_LOGI("DATALOG", "Tarea servos reanudada.");
+    }
+
     g_descarga_en_curso = false;
+    esp_task_wdt_delete(NULL);
     vTaskDelete(NULL);
 }
 
@@ -2439,20 +2456,20 @@ static void Procesar_Status_App(const char *datos, int len) {
             xTaskCreate(Datalogger_Tarea_Descarga, "tarea_descarga", DATALOG_STACK_SIZE, NULL, DATALOG_PRIORITY, NULL);
         }
     } else if (strncmp(datos, "offline", 7) == 0) {
-        g_descarga_en_curso = false; // Esto abortará el bucle de la tarea
+        g_descarga_en_curso = false; 
     }
 }
 
 static void Procesar_ACK_Datalogger(const char *datos, int len) {
-    // Formato recibido: "HH:MM:SS" o "NACK:HH:MM:SS"
     if (strncmp(datos, "NACK:", 5) == 0) {
-        // Es un NACK, no damos el semáforo para gatillar el reintento
         ESP_LOGW("DATALOG", "NACK recibido de la App");
         return;
     }
     
-    int n = len < sizeof(g_last_ack_id) ? len : sizeof(g_last_ack_id) - 1;
-    memcpy(g_last_ack_id, datos, n);
-    g_last_ack_id[n] = '\0';
-    xSemaphoreGive(g_sem_ack);
+    char ack_payload[12];
+    int n = len < sizeof(ack_payload) ? len : sizeof(ack_payload) - 1;
+    memcpy(ack_payload, datos, n);
+    ack_payload[n] = '\0';
+    // Enviar a la cola IPC (no bloqueante)
+    xQueueSend(g_cola_ack, ack_payload, 0);
 }

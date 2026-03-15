@@ -26,6 +26,18 @@ public class ProcesadorTelemetria {
 
     public boolean procesarDato(String data, Context context) {
         try {
+            if (data.startsWith("TOPIC:" + AlmacenDatosRAM.topicEspStatus)) {
+                String payload = data.substring(data.indexOf("|") + 1);
+                if (payload.equals("offline")) {
+                    AlmacenDatosRAM.conectado_PubSub = "ESP32 DESCONECTADO (LWT)";
+                    AlmacenDatosRAM.conectado = false;
+                } else if (payload.equals("online")) {
+                    AlmacenDatosRAM.conectado_PubSub = "ESP32 EN LÍNEA";
+                    AlmacenDatosRAM.conectado = true;
+                }
+                return true; 
+            }
+
             // DETECCIÓN DE DATOS HISTÓRICOS (Datalogger V2)
             if (data.startsWith("TOPIC:" + AlmacenDatosRAM.topicSubRecord)) {
                 String payload = data.substring(data.indexOf("|") + 1);
@@ -67,6 +79,15 @@ public class ProcesadorTelemetria {
 
             // --- PROCESAMIENTO CANAL LENTO (1Hz) ---
             JSONObject obj = new JSONObject(data);
+            
+            // Guardar cabecera para metadatos CSV si tiene gps y fecha
+            if (obj.has("gps") && obj.has("fecha")) {
+                JSONObject gps = obj.getJSONObject("gps");
+                AlmacenDatosRAM.lastSlowPayloadHeader = String.format(Locale.getDefault(),
+                    "# lat=%.4f,lon=%.4f,fecha=%s",
+                    gps.optDouble("lat", 0), gps.optDouble("lon", 0), 
+                    obj.optString("fecha", "0000-00-00"));
+            }
 
             if (obj.has("gps")) {
                 JSONObject gps = obj.getJSONObject("gps");
@@ -89,6 +110,9 @@ public class ProcesadorTelemetria {
                 long ahora = System.currentTimeMillis();
                 int prevGlobal = AlmacenDatosRAM.health_global;
                 
+                // Actualizar objeto HealthStatus
+                AlmacenDatosRAM.currentHealth.timestampMs = ahora;
+                
                 for (String item : items) {
                     String[] parts = item.split(":");
                     if (parts.length == 2) {
@@ -103,21 +127,21 @@ public class ProcesadorTelemetria {
                     // Notificar si hay degradación (0 -> 1 o 2)
                     if (prevGlobal == 0 && currentGlobal > 0) {
                         String comp = "SISTEMA";
-                        if (AlmacenDatosRAM.health_ina > 0) comp = "INA3221";
-                        else if (AlmacenDatosRAM.health_gps > 0) comp = "GPS";
-                        else if (AlmacenDatosRAM.health_wifi > 0) comp = "WIFI";
-                        else if (AlmacenDatosRAM.health_mqtt > 0) comp = "MQTT";
-                        else if (AlmacenDatosRAM.health_disk > 20) comp = "SPIFFS"; // Umbral firmware
-                        else if (AlmacenDatosRAM.health_servos > 0) comp = "SERVOS";
+                        if (AlmacenDatosRAM.currentHealth.ina > 0) comp = "INA3221";
+                        else if (AlmacenDatosRAM.currentHealth.gps > 0) comp = "GPS";
+                        else if (AlmacenDatosRAM.currentHealth.wifi > 0) comp = "WIFI";
+                        else if (AlmacenDatosRAM.currentHealth.mqtt > 0) comp = "MQTT";
+                        else if (AlmacenDatosRAM.currentHealth.spiffs > 1) comp = "SPIFFS"; // FAIL
+                        else if (AlmacenDatosRAM.currentHealth.servos > 0) comp = "SERVOS";
                         AlmacenDatosRAM.conectado_PubSub = "DEG:" + comp;
                     }
                     AlmacenDatosRAM.health_global = currentGlobal;
+                    AlmacenDatosRAM.currentHealth.global = currentGlobal;
                 }
-
             }
 
             if (obj.has("modo")) {
-                String modoPrincipal = obj.getString("modo"); // AUTO, MAN o SET
+                String modoPrincipal = obj.getString("modo"); 
                 String parking = obj.optString("parking", "false");
                 if (parking.equalsIgnoreCase("true")) {
                     AlmacenDatosRAM.modo = "PARKING";
@@ -126,10 +150,6 @@ public class ProcesadorTelemetria {
                 }
             }
 
-            // AlmacenDatosRAM.factor_vel ya no se sincroniza en v2.1
-
-
-            // Si es el primer dato que llega, avisamos para sincronizar sliders
             if (primeraVez && AlmacenDatosRAM.lat != 0) {
                 primeraVez = false;
                 return true;
@@ -141,16 +161,15 @@ public class ProcesadorTelemetria {
     }
 
     private void actualizarSubsistema(String key, int val, long ts) {
-        if (key.equals("INA")) { AlmacenDatosRAM.health_ina = val; AlmacenDatosRAM.ts_ina = ts; }
-        else if (key.equals("GPS")) { AlmacenDatosRAM.health_gps = val; AlmacenDatosRAM.ts_gps = ts; }
-        else if (key.equals("WIFI")) { AlmacenDatosRAM.health_wifi = val; AlmacenDatosRAM.ts_wifi = ts; }
-        else if (key.equals("MQTT")) { AlmacenDatosRAM.health_mqtt = val; AlmacenDatosRAM.ts_mqtt = ts; }
-        else if (key.equals("SPIFFS")) { AlmacenDatosRAM.health_disk = val; AlmacenDatosRAM.ts_disk = ts; }
-        else if (key.equals("SERVOS")) { AlmacenDatosRAM.health_servos = val; AlmacenDatosRAM.ts_servos = ts; }
+        if (key.equals("INA")) { AlmacenDatosRAM.health_ina = val; AlmacenDatosRAM.ts_ina = ts; AlmacenDatosRAM.currentHealth.ina = val; }
+        else if (key.equals("GPS")) { AlmacenDatosRAM.health_gps = val; AlmacenDatosRAM.ts_gps = ts; AlmacenDatosRAM.currentHealth.gps = val; }
+        else if (key.equals("WIFI")) { AlmacenDatosRAM.health_wifi = val; AlmacenDatosRAM.ts_wifi = ts; AlmacenDatosRAM.currentHealth.wifi = val; }
+        else if (key.equals("MQTT")) { AlmacenDatosRAM.health_mqtt = val; AlmacenDatosRAM.ts_mqtt = ts; AlmacenDatosRAM.currentHealth.mqtt = val; }
+        else if (key.equals("SPIFFS")) { AlmacenDatosRAM.health_disk = val; AlmacenDatosRAM.ts_disk = ts; AlmacenDatosRAM.currentHealth.spiffs = val; }
+        else if (key.equals("SERVOS")) { AlmacenDatosRAM.health_servos = val; AlmacenDatosRAM.ts_servos = ts; AlmacenDatosRAM.currentHealth.servos = val; }
     }
 
     private boolean procesarRegistroDatalogger(String payload, Context context) {
-        // Formato esperado: HH:MM:SS,p1,p2
         try {
             String[] parts = payload.split(",");
             if (parts.length != 3) {
@@ -162,16 +181,18 @@ public class ProcesadorTelemetria {
             float p1 = Float.parseFloat(parts[1]);
             float p2 = Float.parseFloat(parts[2]);
 
-            // Validación de rangos
             boolean horaValida = hora.matches("([01]?[0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]");
             boolean p1Valida = (p1 >= 0 && p1 <= 700);
             boolean p2Valida = (p2 >= 0 && p2 <= 700);
 
             if (horaValida && p1Valida && p2Valida) {
-                // Acumular en memoria (según req)
-                AlmacenDatosRAM.registrosDatalogger.add(payload);
+                AlmacenDatosRAM.DataRecord record = new AlmacenDatosRAM.DataRecord(hora, p1, p2);
                 
-                // Confirmar con ACK mandando el timestamp
+                // Verificar duplicados
+                if (!AlmacenDatosRAM.recordsList.contains(record)) {
+                    AlmacenDatosRAM.recordsList.add(record);
+                }
+                
                 AlmacenDatosRAM.pendingAckId = hora; 
                 return true;
             } else {

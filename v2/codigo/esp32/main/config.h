@@ -23,6 +23,7 @@
 #define MQTT_TOPIC_PUB_SLOW    "solar/status/slow"
 #define MQTT_TOPIC_SUB_CMD     "solar/cmd"
 #define MQTT_TOPIC_APP_STATUS  "solar/app/status"
+#define MQTT_TOPIC_ESP_STATUS  "solar/esp32/status"
 #define MQTT_TOPIC_DATA_RECORD "solar/data/record"
 #define MQTT_TOPIC_DATA_ACK    "solar/data/ack"
 #define MQTT_TOPIC_DATA_DONE   "solar/data/done"
