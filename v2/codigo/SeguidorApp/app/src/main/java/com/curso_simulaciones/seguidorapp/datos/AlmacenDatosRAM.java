@@ -20,6 +20,9 @@ public class AlmacenDatosRAM {
 
     public static volatile String conectado_PubSub = "Hacer clic en CONECTAR...";
     public static volatile boolean conectado = false;
+    
+    // Lista en memoria para acumular registros
+    public static ArrayList<String> registrosDatalogger = new ArrayList<>();
 
     // Datos del Sol
     public static volatile float sol_az = 0;

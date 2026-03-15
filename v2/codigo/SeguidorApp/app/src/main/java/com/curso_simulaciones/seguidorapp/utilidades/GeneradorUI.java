@@ -24,7 +24,7 @@ public class GeneradorUI {
 
     private Activity actividad;
 
-    public Button botonConectar, botonResetGPS;
+    public Button botonConectar, botonResetGPS, botonBatch, botonCompartir;
     public TextView textviewAviso, textviewFechaHora;
 
     public GaugeSimple gaugeSolAz, gaugeSolEl;
@@ -101,6 +101,19 @@ public class GeneradorUI {
         botonResetGPS.setText("VOLVER A GPS");
         botonResetGPS.setTextColor(Color.WHITE);
         botonResetGPS.getBackground().setColorFilter(Color.rgb(200, 50, 50), PorterDuff.Mode.MULTIPLY);
+
+        botonBatch = new Button(actividad);
+        botonBatch.setText("DESCARGAR");
+        botonBatch.setTextColor(Color.WHITE);
+        botonBatch.setTextSize(10);
+        botonBatch.getBackground().setColorFilter(Color.rgb(100, 100, 100), PorterDuff.Mode.MULTIPLY);
+
+        botonCompartir = new Button(actividad);
+        botonCompartir.setText("COMPARTIR");
+        botonCompartir.setTextColor(Color.WHITE);
+        botonCompartir.setTextSize(10);
+        botonCompartir.getBackground().setColorFilter(Color.rgb(50, 50, 150), PorterDuff.Mode.MULTIPLY);
+        botonCompartir.setEnabled(false);
 
         textviewAviso = new TextView(actividad);
         textviewAviso.setGravity(Gravity.CENTER);
@@ -349,6 +362,8 @@ public class GeneradorUI {
         statusCol.addView(textviewAviso);
         
         footer.addView(statusCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+        footer.addView(botonBatch, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.4f));
+        footer.addView(botonCompartir, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.4f));
         footer.addView(botonConectar, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.45f));
         
         main.addView(footer, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f));

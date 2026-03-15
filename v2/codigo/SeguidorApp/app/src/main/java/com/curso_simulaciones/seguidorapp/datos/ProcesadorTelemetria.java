@@ -28,8 +28,7 @@ public class ProcesadorTelemetria {
         try {
             // DETECCIÓN DE LOTE DE DATOS (Calibración)
             if (data.contains("\"batch\":")) {
-                guardarBatchTxt(data, context);
-                return false; 
+                return guardarBatchTxt(data, context); 
             }
 
             // ESTRATEGIA DE OPTIMIZACIÓN (Garbage Collector Bypass)
@@ -155,12 +154,20 @@ public class ProcesadorTelemetria {
         return suma / count;
     }
 
-    private void guardarBatchTxt(String jsonStr, Context context) {
+    private boolean guardarBatchTxt(String jsonStr, Context context) {
         try {
             JSONObject obj = new JSONObject(jsonStr);
             String content = obj.optString("data", "");
             
-            // Guardamos en la carpeta de archivos del sistema
+            // 1. Poblamos la lista en memoria para que el botón "Compartir" sea útil inmediatamente
+            String[] lines = content.split("\n");
+            for (String line : lines) {
+                if (!line.trim().isEmpty() && !line.contains("P1")) { // Evitar cabeceras repetidas
+                    AlmacenDatosRAM.registrosDatalogger.add(line);
+                }
+            }
+
+            // 2. Guardamos en la carpeta de archivos del sistema (.txt persistente)
             File folder = context.getExternalFilesDir(null);
             String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
             File file = new File(folder, "batch_potencia_" + timeStamp + ".txt");
@@ -169,12 +176,14 @@ public class ProcesadorTelemetria {
             out.write(content.getBytes());
             out.close();
             
-            AlmacenDatosRAM.conectado_PubSub = "Archivo guardado: " + file.getName();
+            AlmacenDatosRAM.conectado_PubSub = "Lote guardado: " + file.getName();
             android.util.Log.i("TELEMETRIA", "Lote guardado en: " + file.getAbsolutePath());
+            return true;
             
         } catch (Exception e) {
             e.printStackTrace();
             AlmacenDatosRAM.conectado_PubSub = "Error al guardar lote .txt";
+            return false;
         }
     }
 }

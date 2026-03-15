@@ -1452,8 +1452,8 @@ static void Publicar_Batch_Potencia_MQTT(void) {
     free(json_buff);
     
     // Opcionalmente podemos resetear el contador tras envío
-    // batch_count = 0; 
-    // last_batch_p1 = -100.0f;
+    batch_count = 0; 
+    last_batch_p1 = -100.0f;
 }
 
 // ─── ESTRATEGIA DE PERSISTENCIA NVS (PROTECCIÓN DE FLASH) ────────────────────
@@ -1579,7 +1579,14 @@ static void Procesar_Comando_MQTT(const char *datos, int len) {
     
     ESP_LOGI(TAG, "MQTT: Reset a modo GPS. Nuevo destino calculado al instante.");
   }
-  // 3. COMANDOS: FIJAR UBICACIÓN VIRTUAL (TESTING EN INTERIORES)
+  // 3. COMANDO: GET_TEMP (Trigger para descarga del Batch de Calibración)
+  else if (strncmp(cmd_ptr, "get_temp", 8) == 0) {
+    Publicar_Batch_Potencia_MQTT();
+    batch_count = 0; // Resetear tras envío manual
+    last_batch_p1 = -100.0f;
+    ESP_LOGI(TAG, "MQTT: Solicitud de batch procesada.");
+  }
+  // 4. COMANDOS: FIJAR UBICACIÓN VIRTUAL (TESTING EN INTERIORES)
   else if (strncmp(cmd_ptr, "set_lat", 7) == 0) {
     char *val_ptr = strstr(buf, "\"valor\"");
     if (!val_ptr)

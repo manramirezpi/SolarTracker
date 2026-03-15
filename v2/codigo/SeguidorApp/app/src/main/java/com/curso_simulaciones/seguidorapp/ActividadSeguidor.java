@@ -16,6 +16,16 @@ import com.curso_simulaciones.seguidorapp.utilidades.GeneradorUI;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import android.util.Log;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
+import android.net.Uri;
+import androidx.core.content.FileProvider;
+import android.content.Intent;
+
 /**
  * Controlador principal de la aplicación SeguidorApp (Capa "Controlador" en el patrón MVC/MVP).
  * 
@@ -168,9 +178,53 @@ public class ActividadSeguidor extends Activity implements Runnable {
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {
-                publicarComando("set_ser_el", seekBar.getProgress(), true);
+                if (AlmacenDatosRAM.conectado) {
+                    publicarComando("set_ser_el", seekBar.getProgress(), true);
+                }
             }
         });
+
+        ui.botonBatch.setOnClickListener(v -> {
+            if (AlmacenDatosRAM.conectado) {
+                AlmacenDatosRAM.registrosDatalogger.clear();
+                ui.botonCompartir.setEnabled(false);
+                publicarComando("get_temp", 0, false);
+                AlmacenDatosRAM.conectado_PubSub = "Solicitando lote...";
+                actualizarUI();
+            }
+        });
+
+        ui.botonCompartir.setOnClickListener(v -> generarYCompartirCSV());
+    }
+
+    private void generarYCompartirCSV() {
+        if (AlmacenDatosRAM.registrosDatalogger.isEmpty()) return;
+
+        try {
+            String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
+            File cacheDir = getExternalCacheDir();
+            File file = new File(cacheDir, "SolarTracker_Batch_" + timestamp + ".csv");
+            
+            FileOutputStream out = new FileOutputStream(file);
+            String header = "P1_mW,P2_mW\n";
+            out.write(header.getBytes());
+
+            for (String registro : AlmacenDatosRAM.registrosDatalogger) {
+                out.write((registro + "\n").getBytes());
+            }
+            out.close();
+
+            Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", file);
+            Intent intent = new Intent(Intent.ACTION_SEND);
+            intent.setType("text/csv");
+            intent.putExtra(Intent.EXTRA_SUBJECT, "SolarTracker Data Batch");
+            intent.putExtra(Intent.EXTRA_STREAM, uri);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(intent, "Compartir CSV..."));
+
+        } catch (Exception e) {
+            Log.e("ActividadSeguidor", "Error al generar CSV", e);
+        }
     }
 
     private void sincronizarControles() {
@@ -330,8 +384,16 @@ public class ActividadSeguidor extends Activity implements Runnable {
 
         if (AlmacenDatosRAM.conectado) {
             ui.botonConectar.setText("DESCONECTAR");
+            ui.botonBatch.setEnabled(true);
         } else {
             ui.botonConectar.setText("CONECTAR");
+            ui.botonBatch.setEnabled(false);
+        }
+
+        if (!AlmacenDatosRAM.registrosDatalogger.isEmpty()) {
+            ui.botonCompartir.setEnabled(true);
+        } else {
+            ui.botonCompartir.setEnabled(false);
         }
     }
 
