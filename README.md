@@ -9,79 +9,78 @@ fotovoltaico para maximizar la captación de energía.
 
 ## Demo
 
-[Video del sistema en operación — próximamente]
+[Video del sistema v2.1 en operación — próximamente]
 
 ---
 
-## Evolución del proyecto
+## Variantes del sistema
 
-| Versión | Plataforma | Características principales |
-|---|---|---|
-| [v1.0](./v1/README.md) | STM32F4 | Seguimiento astronómico, GPS, control de doble eje, interfaz CLI y LCD |
-| [v2.0](./v2/README.md) | ESP32 | Integración IoT con MQTT, app móvil Android, comparación seguidor vs estático |
-| [v2.1](./v2/README.md) | ESP32 | Datalogger persistente, monitoreo de salud industrial, interfaz SCADA |
-| v3.0 *(en desarrollo)* | ESP32 + IMU | Plataforma móvil con corrección de orientación por cuaterniones y P&O diferencial |
+### Instalación fija — v2.1
+Diseñado para instalaciones estáticas donde la base del seguidor 
+no se mueve. El sistema se orienta con precisión usando GPS y 
+algoritmo astronómico de Meeus, con monitoreo energético comparativo 
+respecto a un panel estático de referencia.
+
+👉 [Ver documentación completa](./v2/README.md)
+
+### Plataforma móvil — v3.0 *(en desarrollo)*
+Variante para bases en movimiento como rovers o embarcaciones. 
+Agrega una IMU (GY-91) con filtro de Madgwick para corregir la 
+orientación del panel en tiempo real compensando el movimiento 
+de la plataforma.
+
+👉 Documentación disponible al completar desarrollo
 
 ---
 
 ## Arquitectura general
 ```mermaid
 graph LR
-    GPS[Módulo GPS] --> MCU[Microcontrolador]
+    GPS[Módulo GPS] --> MCU[ESP32]
     MCU --> SERVO_AZ[Servo Azimut]
     MCU --> SERVO_EL[Servo Elevación]
-    MCU --> INA[INA3221 — Medición de potencia]
+    MCU --> INA[INA3221]
     MCU -- MQTT --> BROKER[Broker MQTT]
-    BROKER -- Telemetría --> APP[App Android]
-    APP -- Comandos --> BROKER
+    BROKER --> APP[App Android]
+    APP --> BROKER
 ```
 
 ---
 
-## Hardware
+## Hardware base
 
-| Componente | v1.0 | v2.x |
-|---|---|---|
-| Microcontrolador | STM32F411RE | ESP32 dual-core 240 MHz |
-| Seguimiento | Algoritmo astronómico + GPS | Algoritmo astronómico + GPS |
-| Actuadores | 2 servomotores (PWM) | 2 servomotores (PWM) |
-| Medición de energía | ADC1 (corriente) | INA3221 (potencia en mW) |
-| Conectividad | UART CLI | WiFi + MQTT |
-| Interfaz usuario | LCD 20x4 + consola serie | App Android |
+| Componente | Descripción |
+|---|---|
+| ESP32 dual-core 240 MHz | Unidad de procesamiento principal |
+| 2x Servomotores | Control de azimut y elevación |
+| Módulo GPS (NMEA-0183) | Geolocalización y tiempo UTC |
+| INA3221 | Medición de potencia en tres canales |
 
 ---
 
-## Resultados
+## Historial de versiones
 
-La comparación entre el panel seguidor y un panel estático de 
-referencia se realiza mediante normalización polinomial que compensa 
-las diferencias de respuesta entre paneles bajo las mismas condiciones 
-de irradiancia.
-
-*(Datos de ganancia pendientes — caracterización en progreso)*
+| Versión | Descripción |
+|---|---|
+| v1.0 | Implementación inicial en STM32F4, sin IoT — [ver](./v1/README.md) |
+| v2.0 | Migración a ESP32, integración IoT y app móvil |
+| v2.1 | Datalogger, monitoreo de salud industrial, interfaz SCADA |
+| v3.0 | Plataforma móvil con IMU *(en desarrollo)* |
 
 ---
 
 ## Estructura del repositorio
 ```
 SolarTracker/
-├── v1/                  ← firmware STM32 (seguimiento básico sin IoT)
+├── v1/                  ← firmware STM32
 │   └── README.md
-└── v2/                  ← firmware ESP32 + app Android (IoT)
-    ├── README.md        ← descripción de la versión ESP32
+└── v2/                  ← firmware ESP32 + app Android
+    ├── README.md
     ├── firmware/
-    │   └── README.md    ← detalle técnico del firmware ESP32
+    │   └── README.md
     └── app/
-        └── README.md    ← detalle técnico de la app Android
+        └── README.md
 ```
-
----
-
-## Versiones anteriores
-
-El historial completo de cambios está disponible en el log de Git. 
-Cada subcarpeta contiene su propio README con el detalle técnico 
-de esa versión.
 
 ---
 
