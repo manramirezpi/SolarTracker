@@ -214,7 +214,7 @@ public class ActividadSeguidor extends Activity implements Runnable {
             }
             out.close();
 
-            Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", file);
+            Uri uri = FileProvider.getUriForFile(this, "com.curso_simulaciones.seguidorapp.v2.fileprovider", file);
             Intent intent = new Intent(Intent.ACTION_SEND);
             intent.setType("text/csv");
             intent.putExtra(Intent.EXTRA_SUBJECT, "SolarTracker Data Batch");
