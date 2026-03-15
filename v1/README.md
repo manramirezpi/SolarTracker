@@ -58,8 +58,13 @@ graph LR
 ### Módulos principales
 
 ### Comunicación
-- Recepción GPS por USART1 con DMA para no bloquear el ciclo principal
-- Consola serie por USART2 con DMA para comandos y debug
+- Recepción GPS por USART1 mediante interrupción byte a byte
+  (`HAL_UART_Receive_IT`): cada byte recibido dispara el callback,
+  que acumula caracteres hasta detectar `\n` y señaliza al main
+  mediante flag
+- Consola serie por USART2 con DMA para comandos y debug,
+  garantizando que el procesamiento de comandos no bloquee
+  el ciclo principal
 
 ### Parseo GPS
 - Decodificación de tramas NMEA-0183 `$GPRMC`
