@@ -47,6 +47,7 @@ public class ProcesadorTelemetria {
                 AlmacenDatosRAM.p1_avg_dia = extraerFloat(data, "\"a1\":", idxP);
                 AlmacenDatosRAM.p2_inst = extraerFloat(data, "\"c2\":", idxP);
                 AlmacenDatosRAM.p2_avg_dia = extraerFloat(data, "\"a2\":", idxP);
+                AlmacenDatosRAM.p3_inst = extraerFloat(data, "\"c3\":", idxP);
                 
                 // Actualización de media móvil local para suavizado de gauges
                 contadorMuestreoPotencia++;
@@ -162,7 +163,7 @@ public class ProcesadorTelemetria {
             // 1. Poblamos la lista en memoria para que el botón "Compartir" sea útil inmediatamente
             String[] lines = content.split("\n");
             for (String line : lines) {
-                if (!line.trim().isEmpty() && !line.contains("P1")) { // Evitar cabeceras repetidas
+                if (!line.trim().isEmpty() && !line.startsWith("P1")) { // Evitar cabeceras repetidas
                     AlmacenDatosRAM.registrosDatalogger.add(line);
                 }
             }

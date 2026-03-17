@@ -206,7 +206,7 @@ public class ActividadSeguidor extends Activity implements Runnable {
             File file = new File(cacheDir, "SolarTracker_Batch_" + timestamp + ".csv");
             
             FileOutputStream out = new FileOutputStream(file);
-            String header = "P1_mW,P2_mW\n";
+            String header = "P1_mW,P2_mW,P3_mW\n";
             out.write(header.getBytes());
 
             for (String registro : AlmacenDatosRAM.registrosDatalogger) {
@@ -369,6 +369,7 @@ public class ActividadSeguidor extends Activity implements Runnable {
         ui.p2Inst.setText(String.format("Inst: %.4f mW", AlmacenDatosRAM.p2_inst));
         ui.p2Avg.setText(String.format("Med: %.4f mW", AlmacenDatosRAM.p2_avg));
         ui.p2Daily.setText(String.format("E: %.4f mWh", AlmacenDatosRAM.p2_avg_dia));
+        ui.p3Inst.setText(String.format("P3: %.4f mW", AlmacenDatosRAM.p3_inst));
 
         // Cálculo Eficiencia
         if (AlmacenDatosRAM.p2_avg > 0.001f) {

@@ -33,7 +33,7 @@ public class GeneradorUI {
     public SeekBar sliderManualAz, sliderManualEl;
     public CircularSlider sliderTiempo;
     public TextView labelLat, labelLon, labelManualAz, labelManualEl;
-    public TextView p1Title, p1Inst, p1Avg, p1Daily, p2Title, p2Inst, p2Avg, p2Daily; 
+    public TextView p1Title, p1Inst, p1Avg, p1Daily, p2Title, p2Inst, p2Avg, p2Daily, p3Inst; 
     public TextView labelEficiencia, labelEstadoGPS; 
 
     public final int COLOR_FONDO = Color.rgb(18, 18, 18);
@@ -142,6 +142,8 @@ public class GeneradorUI {
         p2Inst = configLabel("Inst: -- mW");
         p2Avg = configLabel("Med: -- mW");
         p2Daily = configLabel("E: -- mWh");
+        p3Inst = configLabel("P3: -- mW");
+        p3Inst.setTextColor(Color.YELLOW); // Para resaltarlo para el usuario ya que es para calibrar
 
         labelEficiencia = configLabel("Ganancia Móvil: -- %");
         labelEficiencia.setTextSize(14);
@@ -343,6 +345,7 @@ public class GeneradorUI {
         panelPot.addView(p2Inst);
         panelPot.addView(p2Avg);
         panelPot.addView(p2Daily);
+        panelPot.addView(p3Inst);
 
         col2.addView(panelPot, pPanelPot);
         

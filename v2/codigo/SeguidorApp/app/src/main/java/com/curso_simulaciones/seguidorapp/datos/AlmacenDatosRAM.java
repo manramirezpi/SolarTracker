@@ -48,6 +48,7 @@ public class AlmacenDatosRAM {
     // Datos Potencia (Canal 1: Panel Móvil, Canal 2: Panel Fijo)
     public static volatile float p1_inst = 0, p1_avg = 0, p1_avg_dia = 0;
     public static volatile float p2_inst = 0, p2_avg = 0, p2_avg_dia = 0;
+    public static volatile float p3_inst = 0;
 
     // Variables para optimización de promedio (Running Sum)
     public static float sumaP1 = 0;
