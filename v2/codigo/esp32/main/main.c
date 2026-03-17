@@ -67,6 +67,8 @@ static const char *TAG = "SOLAR";
 #define REG_CH1_BUS 0x02     // Ch1 Voltaje (V respecto a GND)
 #define REG_CH2_SHUNT 0x03   // Ch2 Corriente (mV en Shunt)
 #define REG_CH2_BUS 0x04     // Ch2 Voltaje (V respecto a GND)
+#define REG_CH3_SHUNT 0x05   // Ch3 Corriente (mV en Shunt)
+#define REG_CH3_BUS 0x06     // Ch3 Voltaje (V respecto a GND)
 #define REG_MASK_ENABLE 0x0F // Estado: Flag de "Conversión Lista" y Alertas
 
 // ─── Pines ───────────────────────────────────────────────────────────────────
@@ -253,11 +255,16 @@ static bool ina_ch2_valido = false;
 static float ina_ch2_v = 0.0f;
 static float ina_ch2_i = 0.0f;
 static float ina_ch2_p = 0.0f;
+static bool ina_ch3_valido = false;
+static float ina_ch3_v = 0.0f;
+static float ina_ch3_i = 0.0f;
+static float ina_ch3_p = 0.0f;
 
 // ─── CAPTURA TEMPORAL PARA CALIBRACIÓN (BATCH 150) ────────────────────────────
 #define BATCH_SIZE 150
 static float batch_ch1[BATCH_SIZE];
 static float batch_ch2[BATCH_SIZE];
+static float batch_ch3[BATCH_SIZE];
 static int batch_count = 0;
 static float last_batch_p1 = -100.0f;
 
@@ -293,6 +300,7 @@ typedef struct {
 
 static INA_Promedio_t prom_ch1 = {0};
 static INA_Promedio_t prom_ch2 = {0};
+static INA_Promedio_t prom_ch3 = {0};
 
 // ─── Prototipos ──────────────────────────────────────────────────────────────
 static void pwm_init(void);
@@ -625,10 +633,13 @@ static void tarea_medicion_ina(void *arg) {
   // Inicialización de registros temporales para integración de promedios
   prom_ch1.ultimo_tick_5min = xTaskGetTickCount() * portTICK_PERIOD_MS;
   prom_ch2.ultimo_tick_5min = xTaskGetTickCount() * portTICK_PERIOD_MS;
+  prom_ch3.ultimo_tick_5min = xTaskGetTickCount() * portTICK_PERIOD_MS;
   prom_ch1.ultimo_promedio_5min = -1.0f;
   prom_ch2.ultimo_promedio_5min = -1.0f;
+  prom_ch3.ultimo_promedio_5min = -1.0f;
   prom_ch1.dia_actual = -1;
   prom_ch2.dia_actual = -1;
+  prom_ch3.dia_actual = -1;
 
   esp_task_wdt_add(NULL); // suscribir la tarea al watchdog. Comprometiendose
                           // a reportar que está viva periodicamente
@@ -736,16 +747,31 @@ static void tarea_medicion_ina(void *arg) {
     // Pipeline de filtrado digital: Media móvil y promedios diarios
     ina_actualizar_promedio(&prom_ch1, v1, i1, ch1_ok);
     ina_actualizar_promedio(&prom_ch2, v2, i2, ch2_ok);
+    
+    // Adquisición CH3
+    float v3, i3;
+    bool ch3_ok = ina3221_leer_canal(3, &v3, &i3);
+    if (ch3_ok) {
+      ina_ch3_v = v3;
+      ina_ch3_i = i3;
+      ina_ch3_p = v3 * i3;
+      ina_ch3_valido = (ina_ch3_p > 0.0000001f);
+    } else {
+      ina_ch3_valido = false;
+    }
+    ina_actualizar_promedio(&prom_ch3, v3, i3, ch3_ok);
 
     // Captura por barrido (25mW delta) para calibración (BATCH 150)
-    if (ch1_ok && ch2_ok && batch_count < BATCH_SIZE) {
+    if (ch1_ok && ch2_ok && ch3_ok && batch_count < BATCH_SIZE) {
         float p1_ahora = v1 * i1 * 1000.0f;
         float p2_ahora = v2 * i2 * 1000.0f;
+        float p3_ahora = v3 * i3 * 1000.0f;
         
         // Filtro: Diferencia absoluta > 25 mW respecto al último punto guardado
         if (fabsf(p1_ahora - last_batch_p1) >= 25.0f) {
             batch_ch1[batch_count] = p1_ahora;
             batch_ch2[batch_count] = p2_ahora;
+            batch_ch3[batch_count] = p3_ahora;
             last_batch_p1 = p1_ahora;
             batch_count++;
             
@@ -1388,12 +1414,12 @@ static void Publicar_Estado_Rapido_MQTT(void) {
            "{"
            "\"sol\":{\"az\":%.2f,\"el\":%.2f},"
            "\"servos\":{\"az\":%.2f,\"el\":%.2f},"
-           "\"p\":{\"c1\":%.2f,\"a1\":%.2f,\"c2\":%.2f,\"a2\":%.2f}"
+           "\"p\":{\"c1\":%.2f,\"a1\":%.2f,\"c2\":%.2f,\"a2\":%.2f,\"c3\":%.2f}"
            "}",
            gps_solar_real.azimut, gps_solar_real.elevacion, servo_az_deg,
            servo_el_deg, (ina_ch1_p * 1000.0f),
            prom_ch1.energia_acumulada_mwh, (ina_ch2_p * 1000.0f),
-           prom_ch2.energia_acumulada_mwh);
+           prom_ch2.energia_acumulada_mwh, (ina_ch3_p * 1000.0f));
 
   esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC_PUB_FAST, json, 0, 0, 0);
 }
@@ -1437,10 +1463,10 @@ static void Publicar_Batch_Potencia_MQTT(void) {
     char *json_buff = malloc(6144); 
     if (!json_buff) return;
 
-    int pos = snprintf(json_buff, 6144, "{\"batch\":%d,\"data\":\"P1(mW),P2(mW)\\n", batch_count);
+    int pos = snprintf(json_buff, 6144, "{\"batch\":%d,\"data\":\"P1(mW),P2(mW),P3(mW)\\n", batch_count);
     
     for (int i = 0; i < batch_count; i++) {
-        int written = snprintf(json_buff + pos, 6144 - pos, "%.2f,%.2f\\n", batch_ch1[i], batch_ch2[i]);
+        int written = snprintf(json_buff + pos, 6144 - pos, "%.2f,%.2f,%.2f\\n", batch_ch1[i], batch_ch2[i], batch_ch3[i]);
         if (written > 0) pos += written;
         if (pos >= 6100) break; // Límite de seguridad
     }
@@ -1786,11 +1812,11 @@ static bool ina3221_detectar(void) {
 
 // Configura el modo de operación del sensor.
 static esp_err_t ina3221_init(void) {
-  // Configuración 0x6827:
-  // - Habilita Canales 1 y 2.
+  // Configuración 0x7827:
+  // - Habilita Canales 1, 2 y 3.
   // - 64 muestras promediadas para filtrar ruido eléctrico.
   // - Modo continuo de medición (Shunt y Bus).
-  esp_err_t ret = ina3221_write_reg(REG_INA_CONFIG, 0x6827);
+  esp_err_t ret = ina3221_write_reg(REG_INA_CONFIG, 0x7827);
   vTaskDelay(pdMS_TO_TICKS(100)); // Esperar estabilización del chip
   return ret;
 }
