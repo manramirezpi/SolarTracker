@@ -149,52 +149,63 @@ barrido de resistencia de carga:
 
 ### Caracterización de la relación entre paneles
 
-Dado que los dos paneles tienen respuestas ligeramente diferentes a la 
-irradiancia, una corrección lineal introduce error variable a lo largo 
-del día. Para corregir esto, el sistema usa una aproximación polinomial 
-obtenida experimentalmente:
+Dado que los dos paneles tienen respuestas ligeramente diferentes a la
+irradiancia, se realizó una caracterización experimental para obtener un
+modelo de corrección. El procedimiento consistió en exponer ambos paneles
+a las mismas condiciones de irradiancia simultáneamente durante un día con
+variabilidad alta (nubosidad parcial, transiciones sol-sombra), registrando
+pares (P1, P2) distribuidos a lo largo de todo el rango de irradiancia.
 
-**Procedimiento de caracterización:**
-1. Ambos paneles se exponen a las mismas condiciones de irradiancia 
-   simultáneamente a lo largo de un día con variabilidad alta (nubosidad 
-   parcial, transiciones sol-sombra), con el objetivo de cubrir el mayor 
-   rango posible de niveles de irradiancia
-2. Se registran múltiples pares (P_estático, P_seguidor) distribuidos 
-   a lo largo de ese rango
-3. Se ajusta un polinomio de segundo orden por mínimos cuadrados sobre 
-   esos pares:
+La variabilidad atmosférica durante la caracterización es una condición
+deseable: un día completamente despejado produciría datos concentrados en
+un rango estrecho, generando un modelo poco robusto para condiciones reales.
+
+**Modelo obtenido (regresión lineal por mínimos cuadrados):**
 ```
-P_seguidor_esperado = a·P_estático² + b·P_estático + c
+P2_esperado = 1.0854 · P1 − 1.05
 ```
 
-Un día de irradiancia estable produciría datos concentrados en un rango 
-estrecho, resultando en un modelo no apto para condiciones variables. 
-La variabilidad atmosférica durante la caracterización es por tanto 
-una condición deseable, no un inconveniente.
+donde:
+- `P1` = potencia instantánea del panel móvil (seguidor), en mW
+- `P2_esperado` = potencia que se esperaría del panel fijo bajo la misma irradiancia, en mW
 
-Esta expresión representa la potencia que debería generar el panel 
-seguidor si estuviera en las mismas condiciones que el estático. 
-La ganancia real del seguimiento se calcula como:
-```
-ganancia = (P_seguidor_real - P_seguidor_esperado) / P_seguidor_esperado × 100%
-```
+La regresión lineal resultó suficiente para capturar la relación entre
+paneles (R² > 0.99), por lo que no fue necesaria una corrección polinómica
+de mayor grado.
 
-Si `ganancia > 0`, el seguidor está captando más energía de la que 
+Esta expresión permite calcular la ganancia real del seguimiento:
+```
+ganancia = (P1_norm − P2_real) / P2_real × 100%
+```
+donde `P1_norm = 1.0854 · P1 − 1.05` es el panel seguidor normalizado
+a la escala del panel fijo.
+
+Si `ganancia > 0`, el seguidor está captando más energía de la que
 captaría un panel fijo bajo las mismas condiciones atmosféricas.
-
-**Estado actual:** caracterización pendiente. Los coeficientes `a`, `b` 
-y `c` se obtendrán en un día con nubosidad parcial que cubra un rango 
-amplio de irradiancia. Mientras tanto, el firmware usa el factor lineal 
-420/520 = 0.808 como aproximación inicial.
 
 ---
 
 ## Compilación
 
-Requiere ESP-IDF v5.5.3 instalado y configurado.
+**Requisitos:** ESP-IDF v5.5.3 instalado y configurado en el sistema.
+
 ```bash
 cd v2/codigo/esp32
-idf.py set-target esp32   # solo primera vez
+
+# 1. Configurar credenciales de red (solo la primera vez)
+cp main/config.example.h main/config.h
+# Editar main/config.h con el SSID, contraseña WiFi y datos del broker MQTT
+
+# 2. Configurar el target (solo la primera vez)
+idf.py set-target esp32
+
+# 3. Compilar
 idf.py build
+
+# 4. Flashear y monitorear (ajustar el puerto según el sistema)
+#    Linux/macOS: /dev/ttyUSB0 o /dev/ttyACM0
+#    Windows:     COM3, COM4, etc.
 idf.py -p /dev/ttyUSB0 flash monitor
 ```
+
+Al iniciar, el sistema espera fix GPS (LED o log `[GPS] Fix válido`). Una vez adquirido, el seguimiento astronómico arranca automáticamente.

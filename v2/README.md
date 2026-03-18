@@ -4,7 +4,7 @@ Sistema de seguimiento solar de 2 ejes con monitoreo energético comparativo e i
 
 ## Demo
 
-[Video del sistema en operación — próximamente]
+*[Video del sistema en operación — próximamente]*
 
 ---
 
@@ -60,23 +60,34 @@ La aplicación SeguidorApp permite monitoreo en tiempo real y control manual del
 
 ## Resultados
 
-La comparación de eficiencia entre el panel seguidor y el panel estático se realiza mediante homologación por software, compensando la diferencia de potencia nominal entre los dos paneles (factor de normalización: 1.238).
+La comparación de eficiencia entre el panel seguidor y el panel estático
+se realiza mediante homologación por software. Los paneles tienen respuestas
+distintas ante la misma irradiancia, por lo que se caracterizó experimentalmente
+la relación entre ambos y se obtuvo la siguiente curva de corrección:
 
-| Métrica | Valor |
+```
+P2_esperado = 1.0854 · P1 − 1.05
+```
+
+Esta expresión, aplicada en el firmware, permite calcular la ganancia real
+del seguimiento eliminando el efecto de la disparidad entre paneles.
+
+| Métrica | Estado |
 |---|---|
-| Ganancia promedio de energía captada | [pendiente — datos en campo] |
-| Condición de medición | Día despejado, irradiancia estable |
+| Modelo de normalización entre paneles | ✓ Obtenido (regresión lineal, R² > 0.99) |
+| Ganancia promedio de energía captada | En medición — datos disponibles en v2.1 |
+| Condición de medición objetivo | Día despejado, irradiancia estable |
 
-*(Gráficas de curvas P vs R y comparación de mWh — pendiente informe técnico)*
+*(Gráficas comparativas de potencia acumulada (mWh) — disponibles en v2.1)*
 
 ---
 
 ## Cómo replicarlo
 
 1. Conecta los componentes siguiendo el [pinout detallado](./codigo/esp32/README.md#pinout)
-2. Compila y carga el firmware con ESP-IDF v5.5
-3. Instala el APK en Android 7.0 o superior
-4. Configura credenciales WiFi y MQTT en el firmware
+2. Copia `config.example.h` como `config.h` en `codigo/esp32/main/` y completa las credenciales de red
+3. Compila y carga el firmware con ESP-IDF v5.5 (`idf.py build flash monitor`)
+4. Copia `Configuracion.example.java` como `Configuracion.java`, compila la app con `./gradlew assembleDebug` e instala el APK en Android 7.0+
 
 ---
 

@@ -33,24 +33,12 @@
 static const char *TAG = "SOLAR";
 
 // ═══════════════════════════════════════════════════════════════════════════
-// CONFIGURACIÓN WiFi y MQTT — Modifique solo esta sección
+// CONFIGURACIÓN WiFi y MQTT
+// Las credenciales de red se cargan desde config.h (excluido del repositorio).
+// Para configurar en un entorno nuevo, copiar config.example.h como config.h.
 // ═══════════════════════════════════════════════════════════════════════════
-#define WIFI_SSID "3210NX"
-#define WIFI_PASSWORD "71671878"
+#include "config.h"
 
-//#define WIFI_SSID "JP"
-//#define WIFI_PASSWORD "551964jp"
-
-#define WIFI_BACKUP_SSID "321onx_REP"
-#define WIFI_BACKUP_PASSWORD "71671878"
-
-#define WIFI_BACKUP2_SSID "..."
-#define WIFI_BACKUP2_PASSWORD "123456789"
-
-#define MQTT_BROKER_URL "45.56.74.248"
-#define MQTT_BROKER_PORT 1883
-#define MQTT_USERNAME "fisica"
-#define MQTT_PASSWORD "iotfisica"
 #define MQTT_TOPIC_PUB_FAST "solar/status/fast" // 10Hz: Ángulos y Potencia Instantánea
 #define MQTT_TOPIC_PUB_SLOW "solar/status/slow" // 1Hz: GPS, Hora, Promedios e Info
 #define MQTT_TOPIC_SUB "solar/sub"              // ESP32 escucha comandos aquí
@@ -692,20 +680,22 @@ static void tarea_medicion_ina(void *arg) {
     bool ch1_ok = ina3221_leer_canal(1, &v1, &i1);
     bool ch2_ok = ina3221_leer_canal(2, &v2, &i2);
 
-    // ESCALAMIENTO / HOMOLOGACIÓN DE PANELES (DESHABILITADO PARA CALIBRACIÓN)
-    // En el hardware real se utilizan paneles con rendimientos dispares:
-    // Panel 1 (móvil): Carga de 56 ohms, max ~420 mW
-    // Panel 2 (fijo): Carga de 40.2 ohms, max ~520 mW
-    // Para que el análisis de eficiencia (Ganancia del Tracker) sea netamente 
-    // producto de la irradiación solar angular y no de la disparidad estática, 
-    // se escalará matemáticamente el panel de menor producción (Panel 1).
+    // NORMALIZACIÓN DE PANELES
+    // Los paneles operan con cargas de distinto valor (MPP individual):
+    //   Panel 1 (móvil/seguidor): 56 Ω, max ~420 mW
+    //   Panel 2 (fijo/estático):  40.2 Ω, max ~520 mW
     //
-    // [MODO CALIBRACIÓN ACTIVO]: Actualmente se deshabilitó el factor lineal 
-    // `(* 1.238)` para permitir capturar pares de datos RAW (No Lineales) 
-    // y generar una curva de transferencia polinómica de grado 2 real.
-    if (ch1_ok) {
-        // Multiplicamos la corriente por el factor de corrección (Diferido)
-        // i1 = i1 * (520.0f / 420.0f);
+    // Para que la comparación de eficiencia refleje únicamente la ganancia
+    // angular del seguimiento, se normaliza P1 a la escala de P2 mediante
+    // la curva de transferencia obtenida experimentalmente (regresión lineal):
+    //
+    //   P1_norm (mW) = 1.0854 × P1_raw (mW) − 1.05
+    //
+    // Equivalencia en corriente (aplicada antes de calcular potencia):
+    //   i1_norm = 1.0854 × i1 − 1.05 / (v1 × 1000)
+    if (ch1_ok && v1 > 0.01f) {
+        i1 = 1.0854f * i1 - (1.05f / (v1 * 1000.0f));
+        if (i1 < 0.0f) i1 = 0.0f; // Clamp: corriente no puede ser negativa
     }
 
     // Si ambos canales fallan la lectura de datos tras bus OK (ruido masivo)

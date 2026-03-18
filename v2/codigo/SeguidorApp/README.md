@@ -72,6 +72,28 @@ lógica de comunicaciones ni el procesamiento de datos.
 
 ---
 
+## Compilación
+
+**Requisitos:** Android Studio Koala o superior, JDK 17, Android SDK API 24+.
+
+```bash
+cd v2/codigo/SeguidorApp
+
+# 1. Configurar credenciales del broker MQTT (solo la primera vez)
+cp app/src/main/java/com/curso_simulaciones/seguidorapp/Configuracion.example.java \
+   app/src/main/java/com/curso_simulaciones/seguidorapp/Configuracion.java
+# Editar Configuracion.java con la IP/dominio del broker y las credenciales
+
+# 2. Compilar y generar APK de debug
+./gradlew assembleDebug
+
+# El APK queda en: app/build/outputs/apk/debug/app-debug.apk
+```
+
+También se puede abrir el proyecto directamente en Android Studio y ejecutar con `Run ▶` sobre un dispositivo o emulador con Android 7.0+.
+
+---
+
 ## Requisitos
 
 - Android Studio Koala o superior
@@ -82,4 +104,4 @@ lógica de comunicaciones ni el procesamiento de datos.
 
 ## Capturas de pantalla
 
-*(Pendiente — dashboard en operación, gráfica comparativa de paneles)*
+*(Las capturas de pantalla se agregarán junto con los datos de campo en v2.1)*

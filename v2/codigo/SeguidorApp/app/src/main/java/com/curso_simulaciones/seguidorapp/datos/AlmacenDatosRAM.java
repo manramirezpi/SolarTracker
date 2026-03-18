@@ -2,6 +2,8 @@ package com.curso_simulaciones.seguidorapp.datos;
 
 import java.util.ArrayList;
 
+import com.curso_simulaciones.seguidorapp.Configuracion;
+
 public class AlmacenDatosRAM {
 
     public static int ancho, alto, dimensionReferencia, tamanoLetraResolucionIncluida;
@@ -9,9 +11,10 @@ public class AlmacenDatosRAM {
     // Estado del broker
     public static int estado_conexion_nube = 1;
 
-    public static String MQTTHOST = "tcp://45.56.74.248:1883"; 
-    public static String USERNAME = "fisica";
-    public static String PASSWORD = "iotfisica";
+    // Credenciales cargadas desde Configuracion.java (excluido del repositorio)
+    public static String MQTTHOST = Configuracion.MQTT_HOST;
+    public static String USERNAME = Configuracion.MQTT_USERNAME;
+    public static String PASSWORD = Configuracion.MQTT_PASSWORD;
     public static String topicSubFast = "solar/status/fast";
     public static String topicSubSlow = "solar/status/slow";
     public static String topicSubBatch = "solar/data/batch";

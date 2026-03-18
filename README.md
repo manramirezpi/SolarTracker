@@ -9,7 +9,7 @@ maximizar la captación de energía.
 
 ## Demo
 
-[Video del sistema v2.1 en operación — próximamente]
+*[Video del sistema v2.1 en operación — próximamente]*
 
 ---
 
