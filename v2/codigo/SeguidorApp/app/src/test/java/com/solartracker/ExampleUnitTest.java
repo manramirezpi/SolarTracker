@@ -1,4 +1,4 @@
-package com.curso_simulaciones.seguidorapp;
+package com.solartracker;
 
 import org.junit.Test;
 

@@ -1,4 +1,4 @@
-package com.curso_simulaciones.seguidorapp.utilidades;
+package com.solartracker.utilidades;
 
 import android.content.Context;
 import android.graphics.Canvas;

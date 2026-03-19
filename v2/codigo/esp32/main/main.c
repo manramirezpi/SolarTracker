@@ -243,16 +243,11 @@ static bool ina_ch2_valido = false;
 static float ina_ch2_v = 0.0f;
 static float ina_ch2_i = 0.0f;
 static float ina_ch2_p = 0.0f;
-static bool ina_ch3_valido = false;
-static float ina_ch3_v = 0.0f;
-static float ina_ch3_i = 0.0f;
-static float ina_ch3_p = 0.0f;
 
 // ─── CAPTURA TEMPORAL PARA CALIBRACIÓN (BATCH 150) ────────────────────────────
 #define BATCH_SIZE 150
 static float batch_ch1[BATCH_SIZE];
 static float batch_ch2[BATCH_SIZE];
-static float batch_ch3[BATCH_SIZE];
 static int batch_count = 0;
 static float last_batch_p1 = -100.0f;
 
@@ -288,7 +283,6 @@ typedef struct {
 
 static INA_Promedio_t prom_ch1 = {0};
 static INA_Promedio_t prom_ch2 = {0};
-static INA_Promedio_t prom_ch3 = {0};
 
 // ─── Prototipos ──────────────────────────────────────────────────────────────
 static void pwm_init(void);
@@ -307,7 +301,6 @@ static uint8_t es_bisiesto(int ano);
 static void Actualizar_Coordenadas_Calculo(void);
 static void Gestionar_Tiempo_Sistema(void);
 static void Incrementar_Tiempo_Simulado(LocalTime_t *t, int segundos);
-//static void Publicar_Estado_MQTT(void);
 static void Publicar_Estado_Rapido_MQTT(void);
 static void Publicar_Estado_Lento_MQTT(void);
 static void Cargar_Configuracion_NVS(void);
@@ -475,19 +468,15 @@ static void tarea_gps(void *arg) {
   }
 }
 
-// ─── ORQUESTACIÓN LÓGICA Y CONTROL CINEMÁTICO (TAREA PRINCIPAL)
-// ──────────────── Esta tarea opera como el Consumidor Central en la
-// arquitectura de paso de mensajes del sistema. Coordina la transformación de
-// datos NMEA crudos en acciones mecánicas y despacho de telemetría:
-// - Etapa 1 (Parsing): Deserialización de tramas NMEA-0183 y cálculo de tiempo
-// local.
-// - Etapa 2 (Fusión): Cálculo de algoritmos astronómicos para posición solar
-// real.
-// - Etapa 3 (Control): Máquina de estados para modos Manual, Búsqueda y
-// Automático.
-//   Incluye validación de integridad temporal (>2024) para el inicio de
-//   tracking.
-// - Etapa 4 (Telemetría): Serialización JSON y publicación asíncrona vía MQTT.
+// ─── ORQUESTACIÓN LÓGICA Y CONTROL CINEMÁTICO (TAREA PRINCIPAL) ──────────────
+// Esta tarea opera como el consumidor central en la arquitectura de paso de
+// mensajes del sistema. Coordina la transformación de datos NMEA crudos en
+// acciones mecánicas y despacho de telemetría:
+// - Etapa 1 (Parsing):     Deserialización de tramas NMEA-0183 y cálculo de hora local.
+// - Etapa 2 (Fusión):      Cálculo astronómico para posición solar real.
+// - Etapa 3 (Control):     Máquina de estados — modos Manual, Búsqueda y Automático.
+//                          Incluye validación de integridad temporal (>2024).
+// - Etapa 4 (Telemetría):  Serialización JSON y publicación asíncrona vía MQTT.
 
 static void tarea_principal(void *arg) {
   esp_task_wdt_add(NULL); // Suscribir esta tarea al Watchdog
@@ -589,12 +578,10 @@ static void tarea_principal(void *arg) {
         ticks_sin_gps = 0; // Heartbeat
       }
 
-      // Despacho de captura de calibración (Una sola vez cuando esté listo)
-      if (batch_count >= BATCH_SIZE) { // Check if batch is full
-        Publicar_Batch_Potencia_MQTT();
-        batch_count = 0; // Reset batch count after publishing
-        last_batch_p1 = -100.0f; // Reset last power for new batch
-        ESP_LOGI(TAG, "Debug: Reporte de batch de potencia enviado exitosamente.");
+      // Despacho de captura de calibración (cuando el batch está completo)
+      if (batch_count >= BATCH_SIZE) {
+        Publicar_Batch_Potencia_MQTT(); // El reset de batch_count ocurre dentro
+        ESP_LOGI(TAG, "Reporte de batch de potencia enviado exitosamente.");
       }
     } else {
       // Si no hay MQTT, el heartbeat se mide en ciclos de 100ms (50 = 5s)
@@ -621,13 +608,8 @@ static void tarea_medicion_ina(void *arg) {
   // Inicialización de registros temporales para integración de promedios
   prom_ch1.ultimo_tick_5min = xTaskGetTickCount() * portTICK_PERIOD_MS;
   prom_ch2.ultimo_tick_5min = xTaskGetTickCount() * portTICK_PERIOD_MS;
-  prom_ch3.ultimo_tick_5min = xTaskGetTickCount() * portTICK_PERIOD_MS;
-  prom_ch1.ultimo_promedio_5min = -1.0f;
-  prom_ch2.ultimo_promedio_5min = -1.0f;
-  prom_ch3.ultimo_promedio_5min = -1.0f;
   prom_ch1.dia_actual = -1;
   prom_ch2.dia_actual = -1;
-  prom_ch3.dia_actual = -1;
 
   esp_task_wdt_add(NULL); // suscribir la tarea al watchdog. Comprometiendose
                           // a reportar que está viva periodicamente
@@ -738,36 +720,21 @@ static void tarea_medicion_ina(void *arg) {
     ina_actualizar_promedio(&prom_ch1, v1, i1, ch1_ok);
     ina_actualizar_promedio(&prom_ch2, v2, i2, ch2_ok);
     
-    // Adquisición CH3
-    float v3, i3;
-    bool ch3_ok = ina3221_leer_canal(3, &v3, &i3);
-    if (ch3_ok) {
-      ina_ch3_v = v3;
-      ina_ch3_i = i3;
-      ina_ch3_p = v3 * i3;
-      ina_ch3_valido = (ina_ch3_p > 0.0000001f);
-    } else {
-      ina_ch3_valido = false;
-    }
-    ina_actualizar_promedio(&prom_ch3, v3, i3, ch3_ok);
 
     // Captura por barrido (25mW delta) para calibración (BATCH 150)
-    if (ch1_ok && ch2_ok && ch3_ok && batch_count < BATCH_SIZE) {
+    if (ch1_ok && ch2_ok && batch_count < BATCH_SIZE) {
         float p1_ahora = v1 * i1 * 1000.0f;
         float p2_ahora = v2 * i2 * 1000.0f;
-        float p3_ahora = v3 * i3 * 1000.0f;
         
         // Filtro: Diferencia absoluta > 25 mW respecto al último punto guardado
         if (fabsf(p1_ahora - last_batch_p1) >= 25.0f) {
             batch_ch1[batch_count] = p1_ahora;
             batch_ch2[batch_count] = p2_ahora;
-            batch_ch3[batch_count] = p3_ahora;
             last_batch_p1 = p1_ahora;
             batch_count++;
             
             if (batch_count == BATCH_SIZE) {
-                ESP_LOGI("INA", "Batch de potencia lleno. Enviando...");
-                // Podríamos disparar el envío automático aquí si se desea
+                ESP_LOGI("INA", "Batch de potencia lleno. Listo para enviar.");
             }
         }
     }
@@ -821,9 +788,8 @@ static void pwm_init(void) {
   ledc_channel_config(&ch_el);
 }
 
-// Se encarga de asignar el destino de los motores, con base en la posicion
-// actual del sol. Unicamente para modo GPS, modo en que solo se usan los
-// datos del GPS
+// Traduce la posición solar calculada a ángulos físicos de los servos.
+// Aplica la lógica de back-flip para cobertura de 360° con servos de 180°.
 static void Actualizar_Servos(void) {
   float az_real = (float)gps_solar.azimut;
   float el_real = (float)gps_solar.elevacion;
@@ -958,7 +924,7 @@ static void timer_movimiento_callback(void *arg) {
 }
 
 // ─── GPS ─────────────────────────────────────────────────────────────────────
-// inicializacion y carga de configuracion del GPS
+// Inicializa la UART asignada al módulo GPS y configura el driver de ESP-IDF.
 static void gps_uart_init(void) {
   uart_config_t uart_cfg = {.baud_rate = GPS_BAUD,
                             .data_bits = UART_DATA_8_BITS,
@@ -1404,12 +1370,12 @@ static void Publicar_Estado_Rapido_MQTT(void) {
            "{"
            "\"sol\":{\"az\":%.2f,\"el\":%.2f},"
            "\"servos\":{\"az\":%.2f,\"el\":%.2f},"
-           "\"p\":{\"c1\":%.2f,\"a1\":%.2f,\"c2\":%.2f,\"a2\":%.2f,\"c3\":%.2f}"
+           "\"p\":{\"c1\":%.2f,\"a1\":%.2f,\"c2\":%.2f,\"a2\":%.2f}"
            "}",
            gps_solar_real.azimut, gps_solar_real.elevacion, servo_az_deg,
            servo_el_deg, (ina_ch1_p * 1000.0f),
            prom_ch1.energia_acumulada_mwh, (ina_ch2_p * 1000.0f),
-           prom_ch2.energia_acumulada_mwh, (ina_ch3_p * 1000.0f));
+           prom_ch2.energia_acumulada_mwh);
 
   esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC_PUB_FAST, json, 0, 0, 0);
 }
@@ -1445,18 +1411,17 @@ static void Publicar_Estado_Lento_MQTT(void) {
 }
 
 // ─── FUNCIÓN BATCH: ENVÍO DE DATOS DE POTENCIA ACUMULADOS ────────────────────
+// Buffer estático: evita fragmentación del heap de FreeRTOS en sistema de larga duración.
+// Es seguro porque esta función solo se llama desde tarea_principal (no re-entrante).
 static void Publicar_Batch_Potencia_MQTT(void) {
     if (!mqtt_client || batch_count == 0) return;
-    
-    // Alarma dinámica: 256 pares + cabeceras (aprox 5-6KB)
-    // Usamos heap para no saturar stack
-    char *json_buff = malloc(6144); 
-    if (!json_buff) return;
 
-    int pos = snprintf(json_buff, 6144, "{\"batch\":%d,\"data\":\"P1(mW),P2(mW),P3(mW)\\n", batch_count);
+    static char json_buff[6144];
+
+    int pos = snprintf(json_buff, 6144, "{\"batch\":%d,\"data\":\"P1(mW),P2(mW)\\n", batch_count);
     
     for (int i = 0; i < batch_count; i++) {
-        int written = snprintf(json_buff + pos, 6144 - pos, "%.2f,%.2f,%.2f\\n", batch_ch1[i], batch_ch2[i], batch_ch3[i]);
+        int written = snprintf(json_buff + pos, 6144 - pos, "%.2f,%.2f\\n", batch_ch1[i], batch_ch2[i]);
         if (written > 0) pos += written;
         if (pos >= 6100) break; // Límite de seguridad
     }
@@ -1465,10 +1430,9 @@ static void Publicar_Batch_Potencia_MQTT(void) {
     
     // Enviamos a un tópico específico para lotes
     esp_mqtt_client_publish(mqtt_client, "solar/data/batch", json_buff, 0, 1, 0);
-    free(json_buff);
-    
+
     // Reseteamos el contador tras el envío para permitir un nuevo ciclo de captura
-    batch_count = 0; 
+    batch_count = 0;
     last_batch_p1 = -100.0f;
 }
 
@@ -1953,8 +1917,7 @@ static void ina_actualizar_promedio(INA_Promedio_t *p, float v, float i,
   }
 }
 
-// ─── GESTIÓN DE CONECTIVIDAD WIFI (REDUNDANCIA TRIPLE Y BACKOFF)
-// ──────────────
+// ─── GESTIÓN DE CONECTIVIDAD WIFI (REDUNDANCIA TRIPLE Y BACKOFF) ─────────────
 
 // ─── Variables para Reconexión WiFi Exponencial y Respaldo ───────────────────
 static uint8_t indice_red_wifi = 0; // 0=Principal, 1=Respaldo1, 2=Respaldo2

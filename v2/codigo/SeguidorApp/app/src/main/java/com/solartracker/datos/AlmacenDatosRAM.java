@@ -1,9 +1,19 @@
-package com.curso_simulaciones.seguidorapp.datos;
+package com.solartracker.datos;
 
 import java.util.ArrayList;
 
-import com.curso_simulaciones.seguidorapp.Configuracion;
+import com.solartracker.Configuracion;
 
+/**
+ * Almacén de estado global de la aplicación (patrón Singleton implícito mediante campos estáticos).
+ *
+ * Centraliza todos los datos compartidos entre la capa de comunicaciones (ClientePubSubMQTT),
+ * el procesador de telemetría (ProcesadorTelemetria) y la capa de presentación (GeneradorUI).
+ *
+ * Los campos marcados como {@code volatile} son escritos desde el hilo de callbacks de MQTT
+ * y leídos desde el UI Thread — la palabra clave garantiza visibilidad inmediata entre hilos
+ * sin necesidad de sincronización explícita para lecturas simples.
+ */
 public class AlmacenDatosRAM {
 
     public static int ancho, alto, dimensionReferencia, tamanoLetraResolucionIncluida;
@@ -51,7 +61,6 @@ public class AlmacenDatosRAM {
     // Datos Potencia (Canal 1: Panel Móvil, Canal 2: Panel Fijo)
     public static volatile float p1_inst = 0, p1_avg = 0, p1_avg_dia = 0;
     public static volatile float p2_inst = 0, p2_avg = 0, p2_avg_dia = 0;
-    public static volatile float p3_inst = 0;
 
     // Variables para optimización de promedio (Running Sum)
     public static float sumaP1 = 0;

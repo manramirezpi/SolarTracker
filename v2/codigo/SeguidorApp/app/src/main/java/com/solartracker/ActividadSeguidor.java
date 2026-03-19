@@ -1,4 +1,4 @@
-package com.curso_simulaciones.seguidorapp;
+package com.solartracker;
 
 import android.app.Activity;
 import android.graphics.Color;
@@ -7,11 +7,11 @@ import android.os.Handler;
 import android.view.ViewGroup;
 import android.widget.SeekBar;
 
-import com.curso_simulaciones.seguidorapp.comunicaciones.ClientePubSubMQTT;
-import com.curso_simulaciones.seguidorapp.datos.AlmacenDatosRAM;
-import com.curso_simulaciones.seguidorapp.datos.ProcesadorTelemetria;
-import com.curso_simulaciones.seguidorapp.utilidades.DialogoSalir;
-import com.curso_simulaciones.seguidorapp.utilidades.GeneradorUI;
+import com.solartracker.comunicaciones.ClientePubSubMQTT;
+import com.solartracker.datos.AlmacenDatosRAM;
+import com.solartracker.datos.ProcesadorTelemetria;
+import com.solartracker.utilidades.DialogoSalir;
+import com.solartracker.utilidades.GeneradorUI;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -72,6 +72,12 @@ public class ActividadSeguidor extends Activity implements Runnable {
         hilo.start();
     }
 
+    /**
+     * Registra todos los listeners de la UI. Separa la lógica de eventos de la construcción
+     * de vistas (que ocurre en GeneradorUI) y del ciclo de vida (onCreate/onDestroy).
+     * Cada listener aplica un throttle de 150ms antes de publicar por MQTT para evitar
+     * saturar el broker durante arrastres continuos del usuario.
+     */
     private void eventos() {
         ui.botonConectar.setOnClickListener(v -> {
             if (!AlmacenDatosRAM.conectado) {
@@ -206,7 +212,7 @@ public class ActividadSeguidor extends Activity implements Runnable {
             File file = new File(cacheDir, "SolarTracker_Batch_" + timestamp + ".csv");
             
             FileOutputStream out = new FileOutputStream(file);
-            String header = "P1_mW,P2_mW,P3_mW\n";
+            String header = "P1_mW,P2_mW\n";
             out.write(header.getBytes());
 
             for (String registro : AlmacenDatosRAM.registrosDatalogger) {
@@ -214,7 +220,7 @@ public class ActividadSeguidor extends Activity implements Runnable {
             }
             out.close();
 
-            Uri uri = FileProvider.getUriForFile(this, "com.curso_simulaciones.seguidorapp.v2.fileprovider", file);
+            Uri uri = FileProvider.getUriForFile(this, "com.solartracker.fileprovider", file);
             Intent intent = new Intent(Intent.ACTION_SEND);
             intent.setType("text/csv");
             intent.putExtra(Intent.EXTRA_SUBJECT, "SolarTracker Data Batch");
@@ -227,6 +233,11 @@ public class ActividadSeguidor extends Activity implements Runnable {
         }
     }
 
+    /**
+     * Restaura los controles deslizantes a la posición real reportada por el hardware.
+     * Se llama tras un reset GPS o cuando llega el primer dato de telemetría válido,
+     * evitando que los sliders queden desincronizados con el estado real del seguidor.
+     */
     private void sincronizarControles() {
         AlmacenDatosRAM.resetStats(); 
         intervencionGPS = false;
@@ -246,6 +257,12 @@ public class ActividadSeguidor extends Activity implements Runnable {
         ui.sliderTiempo.setValue(1.0f);
     }
 
+    /**
+     * Serializa y publica un comando JSON al broker MQTT.
+     * @param cmd       Nombre del comando (ej. "set_lat", "reset", "set_vel").
+     * @param valor     Valor numérico asociado. Ignorado si {@code conValor} es false.
+     * @param conValor  true si el comando lleva payload de valor; false para comandos sin argumento.
+     */
     private void publicarComando(String cmd, float valor, boolean conValor) {
         try {
             JSONObject obj = new JSONObject();
@@ -369,7 +386,6 @@ public class ActividadSeguidor extends Activity implements Runnable {
         ui.p2Inst.setText(String.format("Inst: %.4f mW", AlmacenDatosRAM.p2_inst));
         ui.p2Avg.setText(String.format("Med: %.4f mW", AlmacenDatosRAM.p2_avg));
         ui.p2Daily.setText(String.format("E: %.4f mWh", AlmacenDatosRAM.p2_avg_dia));
-        ui.p3Inst.setText(String.format("P3: %.4f mW", AlmacenDatosRAM.p3_inst));
 
         // Cálculo Eficiencia
         if (AlmacenDatosRAM.p2_avg > 0.001f) {

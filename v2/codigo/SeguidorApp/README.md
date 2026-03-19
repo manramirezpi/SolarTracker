@@ -19,14 +19,21 @@ SolarTracker v2.0. Se comunica con el firmware del ESP32 mediante MQTT.
 
 ## Arquitectura
 
-La app sigue el patrón MVC con separación estricta entre comunicaciones, 
+La app sigue el patrón MVC con separación estricta entre comunicaciones,
 procesamiento de datos y capa de presentación.
 ```
 SeguidorApp/
-├── ClientePubSubMQTT.java     ← cliente MQTT asíncrono con cola concurrente
-├── ProcesadorTelemetria.java  ← parsing de telemetría optimizado para 5 Hz
-├── GeneradorUI.java           ← componentes visuales aislados de la lógica
-└── MainActivity.java          ← coordinación general y ciclo de vida
+├── comunicaciones/
+│   └── ClientePubSubMQTT.java     ← cliente MQTT asíncrono con cola concurrente
+├── datos/
+│   ├── AlmacenDatosRAM.java       ← estado global compartido entre capas (volatile)
+│   └── ProcesadorTelemetria.java  ← parsing de telemetría optimizado para 5 Hz
+├── utilidades/
+│   ├── GeneradorUI.java           ← componentes visuales aislados de la lógica
+│   ├── GaugeSimple.java           ← medidor analógico con renderizado en Canvas
+│   ├── CircularSlider.java        ← control circular para factor de simulación
+│   └── DialogoSalir.java          ← confirmación de salida
+└── ActividadSeguidor.java         ← coordinación general y ciclo de vida (Controlador MVC)
 ```
 
 ### Decisiones de diseño relevantes
@@ -80,8 +87,8 @@ lógica de comunicaciones ni el procesamiento de datos.
 cd v2/codigo/SeguidorApp
 
 # 1. Configurar credenciales del broker MQTT (solo la primera vez)
-cp app/src/main/java/com/curso_simulaciones/seguidorapp/Configuracion.example.java \
-   app/src/main/java/com/curso_simulaciones/seguidorapp/Configuracion.java
+cp app/src/main/java/com/solartracker/Configuracion.example.java \
+   app/src/main/java/com/solartracker/Configuracion.java
 # Editar Configuracion.java con la IP/dominio del broker y las credenciales
 
 # 2. Compilar y generar APK de debug

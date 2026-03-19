@@ -1,4 +1,4 @@
-package com.curso_simulaciones.seguidorapp.datos;
+package com.solartracker.datos;
 
 import org.json.JSONObject;
 import java.io.File;
@@ -47,7 +47,6 @@ public class ProcesadorTelemetria {
                 AlmacenDatosRAM.p1_avg_dia = extraerFloat(data, "\"a1\":", idxP);
                 AlmacenDatosRAM.p2_inst = extraerFloat(data, "\"c2\":", idxP);
                 AlmacenDatosRAM.p2_avg_dia = extraerFloat(data, "\"a2\":", idxP);
-                AlmacenDatosRAM.p3_inst = extraerFloat(data, "\"c3\":", idxP);
                 
                 // Actualización de media móvil local para suavizado de gauges
                 contadorMuestreoPotencia++;
@@ -101,6 +100,11 @@ public class ProcesadorTelemetria {
         return false;
     }
 
+    /**
+     * Extrae un valor float de un JSON plano sin deserializar el objeto completo (GC bypass).
+     * Busca la clave a partir de {@code searchFromIndex} para evitar colisiones entre campos
+     * con el mismo nombre en distintos objetos anidados (ej. "az" en "sol" vs "servos").
+     */
     private float extraerFloat(String json, String key, int searchFromIndex) {
         int startIdx = json.indexOf(key, searchFromIndex);
         if (startIdx == -1) return 0f;
@@ -121,6 +125,11 @@ public class ProcesadorTelemetria {
         }
     }
 
+    /**
+     * Inserta un nuevo valor en el buffer circular del canal indicado y actualiza la suma acumulada.
+     * Cuando el buffer está lleno, descuenta el valor más antiguo antes de insertar el nuevo
+     * (ventana deslizante de tamaño {@link AlmacenDatosRAM#MAX_HISTORICO}).
+     */
     private void actualizarBufferCircular(float nuevoValor, boolean esCanal1) {
         float[] buffer = esCanal1 ? AlmacenDatosRAM.historico_p1 : AlmacenDatosRAM.historico_p2;
         int index = esCanal1 ? AlmacenDatosRAM.indexP1 : AlmacenDatosRAM.indexP2;
@@ -148,6 +157,7 @@ public class ProcesadorTelemetria {
         }
     }
 
+    /** Calcula la media aritmética del buffer circular del canal indicado. */
     private float obtenerMediaCircular(boolean esCanal1) {
         int count = esCanal1 ? AlmacenDatosRAM.countP1 : AlmacenDatosRAM.countP2;
         if (count == 0) return 0;

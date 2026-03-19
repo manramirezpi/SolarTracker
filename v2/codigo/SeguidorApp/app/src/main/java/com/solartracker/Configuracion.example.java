@@ -1,4 +1,4 @@
-package com.curso_simulaciones.seguidorapp;
+package com.solartracker;
 
 /**
  * Configuracion.example.java — Plantilla de configuración de red.

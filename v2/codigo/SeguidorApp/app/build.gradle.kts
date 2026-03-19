@@ -3,11 +3,11 @@ plugins {
 }
 
 android {
-    namespace = "com.curso_simulaciones.seguidorapp"
+    namespace = "com.solartracker"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.curso_simulaciones.seguidorapp"
+        applicationId = "com.solartracker"
         minSdk = 24
         targetSdk = 32
         versionCode = 1

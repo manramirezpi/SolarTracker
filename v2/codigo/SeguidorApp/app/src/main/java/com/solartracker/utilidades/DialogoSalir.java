@@ -1,4 +1,4 @@
-package com.curso_simulaciones.seguidorapp.utilidades;
+package com.solartracker.utilidades;
 
 import android.app.Activity;
 import android.graphics.Color;
@@ -12,7 +12,7 @@ import android.widget.LinearLayout;
 import android.widget.PopupWindow;
 import android.widget.TextView;
 
-import com.curso_simulaciones.seguidorapp.datos.AlmacenDatosRAM;
+import com.solartracker.datos.AlmacenDatosRAM;
 
 public class DialogoSalir {
 

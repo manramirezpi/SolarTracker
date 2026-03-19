@@ -1,9 +1,9 @@
-package com.curso_simulaciones.seguidorapp.comunicaciones;
+package com.solartracker.comunicaciones;
 
 import android.app.Activity;
 import android.util.Log;
 
-import com.curso_simulaciones.seguidorapp.datos.AlmacenDatosRAM;
+import com.solartracker.datos.AlmacenDatosRAM;
 
 import org.eclipse.paho.client.mqttv3.IMqttActionListener;
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
@@ -16,6 +16,18 @@ import org.eclipse.paho.client.mqttv3.MqttMessage;
 import info.mqtt.android.service.Ack;
 import info.mqtt.android.service.MqttAndroidClient;
 
+/**
+ * Cliente MQTT asíncrono con cola concurrente para desacoplar la recepción de mensajes
+ * del hilo principal de la UI.
+ *
+ * Implementa dos interfaces de Paho:
+ * - {@link MqttCallback}: reacciona a eventos del broker (mensajes, pérdida de conexión).
+ * - {@link IMqttActionListener}: notifica el resultado de connect() (éxito o fallo).
+ *
+ * Los mensajes entrantes se acumulan en una {@link java.util.concurrent.ConcurrentLinkedQueue}
+ * thread-safe. El hilo de la actividad los consume con {@link #leerString()} a su propio ritmo,
+ * evitando bloqueos en el hilo de callbacks de Paho.
+ */
 public class ClientePubSubMQTT implements MqttCallback, IMqttActionListener {
 
     private Activity actividad;
