@@ -32,19 +32,27 @@ Esta versión establece el núcleo de seguimiento y sirvió como base de validac
 | Servomotores (×2) | — | Control de azimut y elevación |
 | Módulo GPS | u-blox NEO-6M | Geolocalización y tiempo UTC — tramas NMEA-0183 |
 | LCD 20×4 | HD44780 + adaptador I2C PCF8574 | Visualización local de estado y coordenadas |
-| Optoacopladores (×2) | PC817 | Aislamiento galvánico entre señales PWM del µC y servos |
+| Optoacopladores (×2) | PC817 | Aislamiento galvánico entre señales PWM del MCU y servos |
+
+---
+
+## Diagrama de conexiones
+
+![Diagrama de conexiones](diagrama_conexiones.png)
+
+*[Ver diagrama interactivo en Wokwi](https://wokwi.com/projects/459155510125235201)*
 
 ---
 
 ## Pinout
 
-| Función | Periférico | Detalle |
-|---|---|---|
-| Servo azimut | TIM11 CH1 | PWM — 500–2500 µs |
-| Servo elevación | TIM10 CH1 | PWM — 500–2500 µs |
-| GPS RX | UART1 | 9600 baud — tramas NMEA $GPRMC |
-| Consola / CLI | UART2 + DMA | 115200 baud — recepción y transmisión sin bloqueo |
-| LCD 20x4 | I2C1 | Dirección 0x23 |
+| Función | Pin | Periférico | Detalle |
+|---|---|---|---|
+| Servo azimut | PB9 | TIM11 CH1 | PWM — 500–2500 µs |
+| Servo elevación | PB8 | TIM10 CH1 | PWM — 500–2500 µs |
+| GPS RX | PA10 | UART1 | 9600 baud — tramas NMEA $GPRMC |
+| Consola / CLI | PA2 / PA3 | UART2 + DMA | 9600 baud — TX/RX sin bloqueo |
+| LCD 20x4 | PB6 / PB7 | I2C1 | Dirección 0x23 |
 
 ---
 
