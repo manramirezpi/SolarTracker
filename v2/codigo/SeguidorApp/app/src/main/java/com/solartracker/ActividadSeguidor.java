@@ -211,14 +211,12 @@ public class ActividadSeguidor extends Activity implements Runnable {
             File cacheDir = getExternalCacheDir();
             File file = new File(cacheDir, "SolarTracker_Batch_" + timestamp + ".csv");
             
-            FileOutputStream out = new FileOutputStream(file);
-            String header = "P1_mW,P2_mW\n";
-            out.write(header.getBytes());
-
-            for (String registro : AlmacenDatosRAM.registrosDatalogger) {
-                out.write((registro + "\n").getBytes());
+            try (FileOutputStream out = new FileOutputStream(file)) {
+                out.write("P1_mW,P2_mW\n".getBytes());
+                for (String registro : AlmacenDatosRAM.registrosDatalogger) {
+                    out.write((registro + "\n").getBytes());
+                }
             }
-            out.close();
 
             Uri uri = FileProvider.getUriForFile(this, "com.solartracker.fileprovider", file);
             Intent intent = new Intent(Intent.ACTION_SEND);

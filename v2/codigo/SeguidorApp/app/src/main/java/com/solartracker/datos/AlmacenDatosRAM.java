@@ -1,6 +1,6 @@
 package com.solartracker.datos;
 
-import java.util.ArrayList;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import com.solartracker.Configuracion;
 
@@ -35,7 +35,8 @@ public class AlmacenDatosRAM {
     public static volatile boolean conectado = false;
     
     // Lista en memoria para acumular registros
-    public static ArrayList<String> registrosDatalogger = new ArrayList<>();
+    // CopyOnWriteArrayList: thread-safe para escritura desde hilo MQTT y lectura desde UI Thread
+    public static CopyOnWriteArrayList<String> registrosDatalogger = new CopyOnWriteArrayList<>();
 
     // Datos del Sol
     public static volatile float sol_az = 0;

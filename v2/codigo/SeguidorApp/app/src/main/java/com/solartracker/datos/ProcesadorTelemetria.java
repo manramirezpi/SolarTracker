@@ -183,9 +183,9 @@ public class ProcesadorTelemetria {
             String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
             File file = new File(folder, "batch_potencia_" + timeStamp + ".txt");
             
-            FileOutputStream out = new FileOutputStream(file);
-            out.write(content.getBytes());
-            out.close();
+            try (FileOutputStream out = new FileOutputStream(file)) {
+                out.write(content.getBytes());
+            }
             
             AlmacenDatosRAM.conectado_PubSub = "Lote guardado: " + file.getName();
             android.util.Log.i("TELEMETRIA", "Lote guardado en: " + file.getAbsolutePath());
