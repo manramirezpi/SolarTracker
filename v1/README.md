@@ -28,7 +28,7 @@ Esta versión establece el núcleo de seguimiento y sirvió como base de validac
 
 | Componente | Referencia | Descripción |
 |---|---|---|
-| MCU | STM32F411RET6 (Nucleo-64) | Unidad de procesamiento principal — 100 MHz |
+| MCU | STM32F411RE (Nucleo-64) | Unidad de procesamiento principal — 100 MHz |
 | Servomotores (×2) | — | Control de azimut y elevación |
 | Módulo GPS | u-blox NEO-6M | Geolocalización y tiempo UTC — tramas NMEA-0183 |
 | LCD 20×4 | HD44780 + adaptador I2C PCF8574 | Visualización local de estado y coordenadas |
