@@ -6,14 +6,33 @@ Esta versión establece el núcleo de seguimiento y sirvió como base de validac
 
 ---
 
+## Demo
+
+[![SolarTracker v1.0 — Seguimiento astronómico en operación](https://img.youtube.com/vi/4lhso6MLvB4/0.jpg)](https://youtu.be/4lhso6MLvB4)
+
+---
+
+## Capturas
+
+| LCD en operación | Sistema completo |
+|---|---|
+| ![LCD mostrando azimut, elevación, hora y fecha en tiempo real](<WhatsApp Image 2026-03-21 at 7.37.44 PM (1).jpeg>) | ![Vista general del mecanismo 2 ejes con panel y electrónica](<WhatsApp Image 2026-03-21 at 7.37.44 PM.jpeg>) |
+
+| Circuito (protoboard) | Calibración de orientación |
+|---|---|
+| ![Protoboard con regulador de voltaje y STM32](<WhatsApp Image 2026-03-21 at 7.37.44 PM (2).jpeg>) | ![Brújula usada para orientar el eje de azimut al Norte geográfico](<WhatsApp Image 2026-03-21 at 7.37.45 PM.jpeg>) |
+
+---
+
 ## Hardware
 
-| Componente | Descripción |
-|---|---|
-| STM32F411RE (Nucleo-64) | Unidad de procesamiento principal — 100 MHz |
-| 2x Servomotores | Control de azimut y elevación |
-| Módulo GPS (NMEA-0183) | Geolocalización y tiempo UTC |
-| LCD 20x4 (I2C) | Visualización local de estado y coordenadas |
+| Componente | Referencia | Descripción |
+|---|---|---|
+| MCU | STM32F411RET6 (Nucleo-64) | Unidad de procesamiento principal — 100 MHz |
+| Servomotores (×2) | — | Control de azimut y elevación |
+| Módulo GPS | u-blox NEO-6M | Geolocalización y tiempo UTC — tramas NMEA-0183 |
+| LCD 20×4 | HD44780 + adaptador I2C PCF8574 | Visualización local de estado y coordenadas |
+| Optoacopladores (×2) | PC817 | Aislamiento galvánico entre señales PWM del µC y servos |
 
 ---
 
