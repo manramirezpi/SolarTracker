@@ -23,12 +23,13 @@ graph LR
 
 ## Hardware
 
-| Componente | Descripción |
-|---|---|
-| ESP32 Dual-Core 240MHz | Unidad de procesamiento principal |
-| 2x Servomotores | Control de azimut y elevación |
-| Módulo GPS (NMEA-0183) | Geolocalización y tiempo UTC |
-| INA3221 | Medición de potencia en tres canales (mW) |
+| Componente | Referencia | Descripción |
+|---|---|---|
+| MCU | ESP32-WROOM-32 | Unidad de procesamiento principal — Dual-Core 240 MHz |
+| Servomotores (×2) | Tower Pro SG5010 | Control de azimut y elevación |
+| Módulo GPS | u-blox NEO-6M | Geolocalización y tiempo UTC — tramas NMEA-0183 |
+| Monitor de potencia | INA3221 | Medición de voltaje, corriente y potencia en 3 canales |
+| Optoacopladores (×2) | PC817 | Aislamiento galvánico entre señales PWM del MCU y servos |
 
 ---
 
@@ -37,9 +38,12 @@ graph LR
 Desarrollado con ESP-IDF v5.5. El firmware implementa seguimiento astronómico basado en coordenadas GPS y fecha/hora UTC, con las siguientes características:
 
 - Movimiento suavizado mediante rampas de aceleración en los servos
-- Reconexión automática con soporte para múltiples redes WiFi
-- Operación continua ante pérdida temporal de señal GPS
+- Reconexión automática con soporte para múltiples redes WiFi y backoff exponencial
+- Operación continua ante pérdida temporal de señal GPS con persistencia en NVS
 - Watchdog por tarea para recuperación ante bloqueos
+- Recuperación autónoma del bus I2C ante desconexión del INA3221
+- Filtrado digital de dos etapas: promedio móvil de 5 minutos y acumulado diario
+- Modo parking nocturno: los servos se posicionan a 90° cuando la elevación solar es negativa
 
 👉 [Detalles técnicos del firmware](./codigo/esp32/README.md)
 
@@ -51,8 +55,8 @@ La aplicación SeguidorApp permite monitoreo en tiempo real y control manual del
 
 - Visualización de potencia instantánea y acumulada (mWh) de ambos paneles
 - Ángulos actuales de azimut y elevación
-- Control manual mediante joystick virtual
-- Gráficas comparativas: panel seguidor vs. panel estático
+- Control manual mediante sliders de azimut y elevación
+- Comparativa de energía acumulada (mWh): panel seguidor vs. panel estático *(gráficas disponibles en v2.1)*
 
 👉 [Detalles técnicos de la app](./codigo/SeguidorApp/README.md)
 
@@ -97,4 +101,5 @@ del seguimiento eliminando el efecto de la disparidad entre paneles.
 |---|---|
 | v1.0 | Seguimiento astronómico básico sin IoT |
 | v2.0 | Integración IoT, app móvil y comparación con panel estático |
-| v3.0 | En desarrollo — corrección para plataformas móviles con IMU |
+| v2.1 | En desarrollo |
+| v3.0 | En desarrollo |

@@ -12,8 +12,9 @@ SolarTracker v2.0. Se comunica con el firmware del ESP32 mediante MQTT.
 | Dashboard energético | Medidores de voltaje, corriente y potencia instantánea a 5 Hz |
 | Control manual | Sliders de azimut y elevación para posicionamiento directo |
 | Modo simulación | Ajuste de velocidad y prueba de trayectorias solares |
-| Comparación de paneles | Gráfica de energía acumulada (mWh) seguidor vs. estático |
+| Comparación de paneles | Energía acumulada (mWh) seguidor vs. estático — gráficas en v2.1 |
 | Geolocalización | Visualización de coordenadas GPS y tiempo UTC activo |
+| Exportación de datos | Descarga y comparte el batch de calibración en formato CSV |
 
 ---
 

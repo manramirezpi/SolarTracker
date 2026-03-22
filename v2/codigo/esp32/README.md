@@ -129,7 +129,7 @@ tarea_principal     1 (baja)    4096        continuo   watchdog y gestión WiFi
 
 ### Watchdog
 - Task Watchdog Timer (TWDT) suscrito a tareas críticas: GPS, INA y principal
-- Timeout de 10 segundos con reinicio suave como último recurso
+- Timeout de 20 segundos con reinicio suave como último recurso
 - Recuperación autónoma del bus I2C ante fallo de comunicación con el INA3221
 
 ---
