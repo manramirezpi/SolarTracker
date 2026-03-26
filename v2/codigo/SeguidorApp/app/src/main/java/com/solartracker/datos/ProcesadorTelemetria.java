@@ -88,6 +88,10 @@ public class ProcesadorTelemetria {
             }
             
             AlmacenDatosRAM.factor_vel = (float) obj.optDouble("v_sim", AlmacenDatosRAM.factor_vel);
+            
+            // --- NUEVOS CAMPOS DE ESTABILIDAD ---
+            AlmacenDatosRAM.uptime_seg = obj.optLong("uptime", AlmacenDatosRAM.uptime_seg);
+            AlmacenDatosRAM.inicio_sesion = obj.optString("inicio", AlmacenDatosRAM.inicio_sesion);
 
             // Si es el primer dato que llega, avisamos para sincronizar sliders
             if (primeraVez && AlmacenDatosRAM.lat != 0) {

@@ -396,6 +396,14 @@ public class ActividadSeguidor extends Activity implements Runnable {
         // Estado GPS
         ui.labelEstadoGPS.setText(AlmacenDatosRAM.gps_valido ? "GPS: SEÑAL ESTABLE" : "GPS: BUSCANDO...");
         ui.labelEstadoGPS.setTextColor(AlmacenDatosRAM.gps_valido ? Color.GREEN : Color.YELLOW);
+        
+        // Estabilidad y Sesión
+        long uptime = AlmacenDatosRAM.uptime_seg;
+        long h = uptime / 3600;
+        long m = (uptime % 3600) / 60;
+        long s = uptime % 60;
+        ui.textviewUptime.setText(String.format(Locale.getDefault(), "Uptime: %dh %02dm %02ds | Inicio: %s", 
+                h, m, s, AlmacenDatosRAM.inicio_sesion));
 
         if (AlmacenDatosRAM.conectado) {
             ui.botonConectar.setText("DESCONECTAR");

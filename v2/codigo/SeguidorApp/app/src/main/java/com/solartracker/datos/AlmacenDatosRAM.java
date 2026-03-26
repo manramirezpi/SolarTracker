@@ -58,6 +58,10 @@ public class AlmacenDatosRAM {
     // Modo y Factor de velocidad
     public static volatile String modo = "GPS";
     public static volatile float factor_vel = 1.0f;
+    
+    // Control de sesión y Uptime
+    public static volatile long uptime_seg = 0;
+    public static volatile String inicio_sesion = "--:--:--";
 
     // Datos Potencia (Canal 1: Panel Móvil, Canal 2: Panel Fijo)
     public static volatile float p1_inst = 0, p1_avg = 0, p1_avg_dia = 0;

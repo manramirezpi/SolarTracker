@@ -25,7 +25,7 @@ public class GeneradorUI {
     private Activity actividad;
 
     public Button botonConectar, botonResetGPS, botonBatch, botonCompartir;
-    public TextView textviewAviso, textviewFechaHora;
+    public TextView textviewAviso, textviewFechaHora, textviewUptime;
 
     public GaugeSimple gaugeSolAz, gaugeSolEl;
     public GaugeSimple gaugeServoAz, gaugeServoEl;
@@ -148,6 +148,12 @@ public class GeneradorUI {
         labelEficiencia.setTextColor(COLOR_ACCENT);
 
         labelEstadoGPS = configLabel("GPS: Buscando...");
+        
+        textviewUptime = new TextView(actividad);
+        textviewUptime.setGravity(Gravity.CENTER);
+        textviewUptime.setTextColor(COLOR_TEXTO_SEC);
+        textviewUptime.setTextSize(10); // Un poco más pequeño
+        textviewUptime.setText("Uptime: -- | Inicio: --");
     }
 
     private SeekBar configSeekBar(int min, int max, int progress) {
@@ -186,7 +192,7 @@ public class GeneradorUI {
         headerContenedor.setBackground(crearFondoHeader());
         
         TextView header = new TextView(actividad);
-        header.setText("SOLAR TRACKER PRO");
+        header.setText("SOLAR TRACKER V2.0");
         header.setTextSize(20); 
         header.setTypeface(null, android.graphics.Typeface.BOLD);
         header.setTextColor(COLOR_ACCENT);
@@ -359,6 +365,7 @@ public class GeneradorUI {
         LinearLayout statusCol = new LinearLayout(actividad);
         statusCol.setOrientation(LinearLayout.VERTICAL);
         statusCol.addView(textviewFechaHora);
+        statusCol.addView(textviewUptime); // Nueva fila de estabilidad
         statusCol.addView(textviewAviso);
         
         footer.addView(statusCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));

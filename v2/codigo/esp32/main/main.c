@@ -215,6 +215,11 @@ static double ultima_lon_valida = 0.0; // Última longitud válida del GPS
 static double lat_nvs_guardada = 0.0;  // Para filtro de desgaste NVS
 static double lon_nvs_guardada = 0.0;  // Para filtro de desgaste NVS
 
+// ─── Control de sesión y estabilidad ─────────────────────────────────────────
+static char hora_inicio_sesion[12] = "Buscando..."; 
+static bool sesion_iniciada = false;
+static int64_t uptime_segundos = 0;
+
 // ─── Modo búsqueda inicial ───────────────────────────────────────────────────
 static bool en_modo_busqueda = true; // Modo búsqueda cuando no hay coordenadas
 static float angulo_az_busqueda = 0.0f; // Ángulo azimutal para búsqueda
@@ -327,7 +332,7 @@ static void tarea_medicion_ina(void *arg);
 // ─── Punto de entrada ────────────────────────────────────────────────────────
 
 void app_main(void) {
-  ESP_LOGI(TAG, "Iniciando Seguidor Solar ESP32");
+  ESP_LOGI(TAG, "Iniciando Seguidor Solar ESP32 v2.0 RE (Resilience Edition)");
 
   // 1. ANÁLOGO A HAL_Init() + SystemClock_Config()
   // ────────────────────────────────────────────────────────
@@ -519,6 +524,14 @@ static void tarea_principal(void *arg) {
         }
 
         Calcular_Posicion_Solar(&gps_solar_real);
+
+        // Captura de hora de inicio de sesión (Primer sincronismo GPS/TIEMPO)
+        if (!sesion_iniciada && tiempo_local.ano >= 2024) {
+            snprintf(hora_inicio_sesion, sizeof(hora_inicio_sesion), "%02d:%02d:%02d", 
+                     tiempo_local.hora, tiempo_local.min, tiempo_local.seg);
+            sesion_iniciada = true;
+            ESP_LOGI(TAG, "Sesión de seguimiento iniciada a las %s", hora_inicio_sesion);
+        }
       }
     } else {
       ticks_sin_gps++;
@@ -1384,7 +1397,9 @@ static void Publicar_Estado_Lento_MQTT(void) {
   if (!mqtt_conectado)
     return;
 
-  char json[380]; // JSON optimizado para baja frecuencia (1Hz)
+  uptime_segundos = esp_timer_get_time() / 1000000;
+
+  char json[450]; // JSON optimizado para baja frecuencia (1Hz)
   snprintf(json, sizeof(json),
            "{"
            "\"hora\":\"%02d:%02d:%02d\","
@@ -1392,7 +1407,9 @@ static void Publicar_Estado_Lento_MQTT(void) {
            "\"gps\":{\"lat\":%.5f,\"lon\":%.5f,\"val\":%s},"
            "\"modo\":\"%s\","
            "\"v_sim\":%d,"
-           "\"parking\":%s"
+           "\"parking\":%s,"
+           "\"uptime\":%lld,"
+           "\"inicio\":\"%s\""
            "}",
            tiempo_local.hora, tiempo_local.min, tiempo_local.seg,
            tiempo_local.dia, tiempo_local.mes, tiempo_local.ano,
@@ -1405,7 +1422,8 @@ static void Publicar_Estado_Lento_MQTT(void) {
                       : (sys_ctrl.usar_lat_manual || sys_ctrl.usar_lon_manual
                              ? "MANUAL"
                              : "GPS")),
-           sys_ctrl.factor_velocidad, en_modo_parking ? "true" : "false");
+           sys_ctrl.factor_velocidad, en_modo_parking ? "true" : "false",
+           uptime_segundos, hora_inicio_sesion);
 
   esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC_PUB_SLOW, json, 0, 0, 0);
 }
@@ -1766,11 +1784,11 @@ static bool ina3221_detectar(void) {
 
 // Configura el modo de operación del sensor.
 static esp_err_t ina3221_init(void) {
-  // Configuración 0x7827:
-  // - Habilita Canales 1, 2 y 3.
-  // - 64 muestras promediadas para filtrar ruido eléctrico.
+  // Configuración 0x6827:
+  // - Habilita Canales 1 y 2 (canal 3 desactivado).
+  // - 128 muestras promediadas para filtrar ruido eléctrico.
   // - Modo continuo de medición (Shunt y Bus).
-  esp_err_t ret = ina3221_write_reg(REG_INA_CONFIG, 0x7827);
+  esp_err_t ret = ina3221_write_reg(REG_INA_CONFIG, 0x6827);
   vTaskDelay(pdMS_TO_TICKS(100)); // Esperar estabilización del chip
   return ret;
 }
