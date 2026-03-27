@@ -3,18 +3,20 @@
 Aplicación móvil para monitoreo en tiempo real y control remoto del sistema 
 SolarTracker v2.0. Se comunica con el firmware del ESP32 mediante MQTT.
 
+Actuando como la nueva capa de visualización e interacción que reemplaza al LCD local de la v1.0, provee telemetría industrial de la planta solar.
+
 ---
 
-## Funcionalidades
+## Características principales
 
 | Función | Descripción |
 |---|---|
-| Dashboard energético | Medidores de voltaje, corriente y potencia instantánea a 5 Hz |
-| Control manual | Sliders de azimut y elevación para posicionamiento directo |
-| Modo simulación | Ajuste de velocidad y prueba de trayectorias solares |
-| Comparación de paneles | Energía acumulada (mWh) seguidor vs. estático — gráficas en v2.1 |
-| Geolocalización | Visualización de coordenadas GPS y tiempo UTC activo |
-| Exportación de datos | Descarga y comparte el batch de calibración en formato CSV |
+| Dashboard Industrial | Tabla compacta de parámetros (Voltaje, Corriente, Potencia) para 2 paneles con actualizaciones fluidas a 4 Hz |
+| Control manual remoto | Control híbrido AUTO/MAN para orientar físicamente (azimut/elevación) el seguidor |
+| Monitoreo de Salud LWT | Sistema de semáforo global y panel detallado (bottom sheet) de salud (Conexión, I2C INA3221, GPS, Memoria) |
+| Adquisición de Datos | Datalogger asíncrono activado por hardware (batch .txt de 150 muestras) |
+| Comparación Energética | Relación 1:1 habilitada por defecto. Preparado para inyección de corrección de calibración cuadrática |
+| Geolocalización y Control | Datos de Lat/Lon y ajustes de fecha manuales y velocidad de simulación |
 
 ---
 
@@ -41,8 +43,8 @@ SeguidorApp/
 
 **Parsing sin JSON**: el procesador de telemetría lee los mensajes MQTT como 
 texto plano en lugar de deserializar JSON. Esto evita la presión sobre el 
-Garbage Collector de Java a 5 Hz de actualización, reduciendo los saltos 
-visuales en los medidores.
+Garbage Collector de Java a 4 Hz de actualización, reduciendo los saltos 
+visuales en la tabla.
 
 **Cola concurrente en MQTT**: el cliente publica y recibe mensajes en un hilo 
 separado para no bloquear el UI Thread. Los datos llegan a la interfaz mediante 
@@ -61,6 +63,11 @@ la aguja sin introducir latencia perceptible.
 en una clase separada, lo que permite modificar la interfaz sin tocar la 
 lógica de comunicaciones ni el procesamiento de datos.
 
+**Gestión de Salud y LWT**: la aplicación integra un sistema integral de monitoreo
+mediante Last Will & Testament (LWT) independiente para App y ESP32. Un panel lateral
+analiza los códigos JSON de estado y pinta un semáforo global para indicar la conexión, 
+fallos en periféricos internos (GPS, I2C INA3221) o problemas de persistencia NVS.
+
 ---
 
 ## Integración MQTT
@@ -69,8 +76,9 @@ lógica de comunicaciones ni el procesamiento de datos.
 
 | Tópico | Contenido | Frecuencia |
 |---|---|---|
-| `solar/status/fast` | Ángulos de azimut y elevación, potencia de ambos paneles | 5 Hz |
-| `solar/status/slow` | Coordenadas GPS, tiempo UTC, estado del sistema | ~1 Hz |
+| `solar/status/fast` | Ángulos de azimut y elevación, potencia de ambos paneles | ~4 Hz |
+| `solar/status/slow` | Coordenadas GPS, tiempo UTC, estado del sistema, salud | ~1 Hz |
+| `solar/data/batch`  | Archivo batch (150 puntos) desencadenado asíncronamente | Evento |
 
 ### Tópicos de publicación
 
@@ -110,6 +118,12 @@ También se puede abrir el proyecto directamente en Android Studio y ejecutar co
 
 ---
 
-## Capturas de pantalla
+## Capturas
 
 *(Las capturas de pantalla se agregarán junto con los datos de campo en v2.1)*
+
+---
+
+## Licencia
+
+MIT License — ver [LICENSE](../../../LICENSE)

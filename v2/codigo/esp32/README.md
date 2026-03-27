@@ -3,6 +3,8 @@
 Firmware desarrollado con ESP-IDF v5.5.3 para el seguimiento solar astronómico 
 de 2 ejes con monitoreo energético e integración IoT.
 
+Esta adaptación para v2.0 abandona la aproximación puramente algorítmica de la v1.0 en STM32, adoptando hardware ESP32 para dotar al seguimiento de comunicación MQTT, persistencia de variables y conectividad IoT nativa.
+
 ---
 
 ## Especificaciones
@@ -93,12 +95,12 @@ tarea_principal     1 (baja)    4096        continuo   watchdog y gestión WiFi
 
 ---
 
-## Módulos principales
+## Características principales
 
 ### Conectividad WiFi y MQTT
 - Soporte para tres redes WiFi con conmutación automática ante fallo
 - Reconexión no bloqueante con backoff exponencial de 2s a 64s
-- Comunicación MQTT bidireccional con el broker
+- Comunicación MQTT bidireccional con soporte de Last Will & Testament (LWT) para monitoreo continuo de salud de red
 
 ### Parseo GPS
 - Decodificación de tramas NMEA-0183 `$GPRMC` con validación por checksum XOR
@@ -147,41 +149,24 @@ barrido de resistencia de carga:
 | Estático | 520 mW | 40.2 Ω |
 | Seguidor | 420 mW | 56 Ω |
 
-### Caracterización de la relación entre paneles
+### Modelo de corrección cuadrático
 
-Dado que los dos paneles tienen respuestas ligeramente diferentes a la
-irradiancia, se realizó una caracterización experimental para obtener un
-modelo de corrección. El procedimiento consistió en exponer ambos paneles
-a las mismas condiciones de irradiancia simultáneamente durante un día con
-variabilidad alta (nubosidad parcial, transiciones sol-sombra), registrando
-pares (P1, P2) distribuidos a lo largo de todo el rango de irradiancia.
+Para la versión 2.0, se ha implementado una **estructura de corrección cuadrática** que permite normalizar la respuesta del panel seguidor ($P_{1}$) respecto al estático ($P_{2}$), compensando diferencias de carga o eficiencia:
 
-La variabilidad atmosférica durante la caracterización es una condición
-deseable: un día completamente despejado produciría datos concentrados en
-un rango estrecho, generando un modelo poco robusto para condiciones reales.
+$$P_{1\_norm} = a \cdot P_{1}^2 + b \cdot P_{1} + c$$
 
-**Modelo obtenido (regresión lineal por mínimos cuadrados):**
-```
-P2_esperado = 1.0854 · P1 − 1.05
-```
+**Estado actual (v2.0):** 
+Se ha configurado una relación **1:1 ($a=0, b=1, c=0$)** por defecto. Esta decisión permite:
+1. Visualizar los datos reales medidos sin procesamientos experimentales previos.
+2. Contar con una infraestructura lista para inyectar coeficientes precisos ($a, b, c$) una vez se complete la caracterización definitiva en campo.
 
-donde:
-- `P1` = potencia instantánea del panel móvil (seguidor), en mW
-- `P2_esperado` = potencia que se esperaría del panel fijo bajo la misma irradiancia, en mW
-
-La regresión lineal resultó suficiente para capturar la relación entre
-paneles (R² > 0.99), por lo que no fue necesaria una corrección polinómica
-de mayor grado.
-
-Esta expresión permite calcular la ganancia real del seguimiento:
+Esta expresión permitirá calcular la ganancia real del seguimiento en versiones futuras:
 ```
 ganancia = (P1_norm − P2_real) / P2_real × 100%
 ```
-donde `P1_norm = 1.0854 · P1 − 1.05` es el panel seguidor normalizado
-a la escala del panel fijo.
+donde $P_{1\_norm}$ es la potencia del panel móvil normalizada a la escala del panel fijo.
 
-Si `ganancia > 0`, el seguidor está captando más energía de la que
-captaría un panel fijo bajo las mismas condiciones atmosféricas.
+Si `ganancia > 0`, el seguidor está captando más energía de la que captaría un panel fijo bajo las mismas condiciones. Actualizar los coeficientes es una operación directa en el firmware (`main.c`).
 
 ---
 
@@ -209,3 +194,9 @@ idf.py -p /dev/ttyUSB0 flash monitor
 ```
 
 Al iniciar, el sistema espera fix GPS (LED o log `[GPS] Fix válido`). Una vez adquirido, el seguimiento astronómico arranca automáticamente.
+
+---
+
+## Licencia
+
+MIT License — ver [LICENSE](../../../LICENSE)

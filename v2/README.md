@@ -2,6 +2,8 @@
 
 Sistema de seguimiento solar de 2 ejes con monitoreo energético comparativo e infraestructura IoT, desarrollado sobre ESP32 con ESP-IDF v5.5.
 
+Esta versión (Resilience Edition) evoluciona a partir de la v1.0, manteniendo el núcleo de algoritmo astronómico y añadiendo conectividad IoT bidireccional, medición de energía en tiempo real y una aplicación Android para control industrial.
+
 ## Demo
 
 *[Video del sistema en operación — próximamente]*
@@ -51,42 +53,39 @@ Desarrollado con ESP-IDF v5.5. El firmware implementa seguimiento astronómico b
 
 ## App Android
 
-La aplicación SeguidorApp permite monitoreo en tiempo real y control manual del sistema.
+La aplicación SeguidorApp ha sido rediseñada con un enfoque de instrumentación industrial, ofreciendo monitoreo en tiempo real, control directo o simulado y un sistema de autodiagnóstico:
 
-- Visualización de potencia instantánea y acumulada (mWh) de ambos paneles
-- Ángulos actuales de azimut y elevación
-- Control manual mediante sliders de azimut y elevación
-- Comparativa de energía acumulada (mWh): panel seguidor vs. panel estático *(gráficas disponibles en v2.1)*
+- **Dashboard Industrial**: Tabla compacta con mediciones de voltaje, corriente y potencia, con actualizaciones rápidas a 4 Hz (sin salto visual por bypass de GC).
+- **Monitoreo de Salud Inteligente**: Diagnóstico global mediante LWT (conexión, integridad de memoria NVS, periféricos GPS e I2C) con desglose en panel inferior.
+- **Control híbrido**: Modos AUTO/MAN para posicionamiento manual de azimut y elevación. Suspensión temporal de telemetría automática tras un comando para evitar rebotes visuales.
+- **Adquisición de calibración**: Datalogger hardware-triggered. Genera un *batch* sincronizado de 150 lecturas delta para calibración remota, exportable como CSV/.txt.
 
 👉 [Detalles técnicos de la app](./codigo/SeguidorApp/README.md)
 
 ---
 
-## Resultados
+## Resultados y Calibración
 
-La comparación de eficiencia entre el panel seguidor y el panel estático
-se realiza mediante homologación por software. Los paneles tienen respuestas
-distintas ante la misma irradiancia, por lo que se caracterizó experimentalmente
-la relación entre ambos y se obtuvo la siguiente curva de corrección:
+Para que la comparación de eficiencia refleje únicamente la ganancia angular del seguimiento, se requiere normalizar la respuesta de los paneles (que pueden tener cargas o eficiencias distintas). 
 
+Actualmente, el firmware incorpora una **estructura de corrección cuadrática** parametrizada:
 ```
-P2_esperado = 1.0854 · P1 − 1.05
+P1_norm = a·P1² + b·P1 + c
 ```
 
-Esta expresión, aplicada en el firmware, permite calcular la ganancia real
-del seguimiento eliminando el efecto de la disparidad entre paneles.
+Para la versión 2.0, se ha optado por mantener una **relación 1:1 (a=0, b=1, c=0)** por defecto. Esto garantiza que los datos mostrados sean los reales medidos, permitiendo que en versiones posteriores (v2.1+) se inyecten los coeficientes definitivos una vez se complete la fase de caracterización experimental.
 
 | Métrica | Estado |
 |---|---|
-| Modelo de normalización entre paneles | ✓ Obtenido (regresión lineal, R² > 0.99) |
-| Ganancia promedio de energía captada | En medición — datos disponibles en v2.1 |
-| Condición de medición objetivo | Día despejado, irradiancia estable |
+| Modelo de normalización | Estructura cuadrática implementada (1:1 por defecto) |
+| Ganancia de energía | En medición — datos disponibles en v2.1 |
+| Condición de medición | Pendiente de validación con irradiancia estable |
 
-*(Gráficas comparativas de potencia acumulada (mWh) — disponibles en v2.1)*
+*(Las gráficas comparativas de potencia acumulada estarán disponibles en la siguiente iteración del software)*
 
 ---
 
-## Cómo replicarlo
+## Compilación
 
 1. Conecta los componentes siguiendo el [pinout detallado](./codigo/esp32/README.md#pinout)
 2. Copia `config.example.h` como `config.h` en `codigo/esp32/main/` y completa las credenciales de red
@@ -103,3 +102,9 @@ del seguimiento eliminando el efecto de la disparidad entre paneles.
 | v2.0 | Integración IoT, app móvil y comparación con panel estático |
 | v2.1 | En desarrollo |
 | v3.0 | En desarrollo |
+
+---
+
+## Licencia
+
+MIT License — ver [LICENSE](../LICENSE)

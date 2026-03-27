@@ -675,21 +675,20 @@ static void tarea_medicion_ina(void *arg) {
     bool ch1_ok = ina3221_leer_canal(1, &v1, &i1);
     bool ch2_ok = ina3221_leer_canal(2, &v2, &i2);
 
-    // NORMALIZACIÓN DE PANELES
-    // Los paneles operan con cargas de distinto valor (MPP individual):
-    //   Panel 1 (móvil/seguidor): 56 Ω, max ~420 mW
-    //   Panel 2 (fijo/estático):  40.2 Ω, max ~520 mW
-    //
-    // Para que la comparación de eficiencia refleje únicamente la ganancia
-    // angular del seguimiento, se normaliza P1 a la escala de P2 mediante
-    // la curva de transferencia obtenida experimentalmente (regresión lineal):
-    //
-    //   P1_norm (mW) = 1.0854 × P1_raw (mW) − 1.05
-    //
-    // Equivalencia en corriente (aplicada antes de calcular potencia):
-    //   i1_norm = 1.0854 × i1 − 1.05 / (v1 × 1000)
+    // ESTRATEGIA DE CORRECCIÓN (NORMALIZACIÓN)
+    // Coeficientes para la relación cuadrática: P_norm = a*P^2 + b*P + c
+    // Actualmente configurado para una relación 1:1 (a=0, b=1, c=0)
+    // Se deja esta estructura para facilitar el reemplazo con valores verificados.
+    float a_coeff = 0.0f;
+    float b_coeff = 1.0f;
+    float c_coeff = 0.0f;
+
     if (ch1_ok && v1 > 0.01f) {
-        i1 = 1.0854f * i1 - (1.05f / (v1 * 1000.0f));
+        float p1_raw_mw = v1 * i1 * 1000.0f;
+        float p1_norm_mw = a_coeff * p1_raw_mw * p1_raw_mw + b_coeff * p1_raw_mw + c_coeff;
+        
+        // Re-calculamos i1 a partir de la potencia normalizada para visualización
+        i1 = p1_norm_mw / (v1 * 1000.0f);
         if (i1 < 0.0f) i1 = 0.0f; // Clamp: corriente no puede ser negativa
     }
 
