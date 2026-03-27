@@ -15,7 +15,7 @@ Actuando como la nueva capa de visualización e interacción que reemplaza al LC
 | Control manual remoto | Control híbrido AUTO/MAN para orientar físicamente (azimut/elevación) el seguidor |
 | Monitoreo de Salud LWT | Sistema de semáforo global y panel detallado (bottom sheet) de salud (Conexión, I2C INA3221, GPS, Memoria) |
 | Adquisición de Datos | Datalogger asíncrono activado por hardware (batch .txt de 150 muestras) |
-| Comparación Energética | Relación 1:1 habilitada por defecto. Preparado para inyección de corrección de calibración cuadrática |
+| Homologación Energética | Relación 1:1 habilitada por defecto. Estructura cuadrática lista para calibración con irradiancia variable. |
 | Geolocalización y Control | Datos de Lat/Lon y ajustes de fecha manuales y velocidad de simulación |
 
 ---

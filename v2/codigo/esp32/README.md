@@ -136,35 +136,21 @@ tarea_principal     1 (baja)    4096        continuo   watchdog y gestión WiFi
 
 ---
 
-## Normalización y comparación de paneles
+## Homologación y Calibración
 
-### Punto óptimo de operación
+Para que la comparación de eficiencia refleje únicamente la ganancia angular del seguimiento, se requiere homologar la respuesta de los paneles (que pueden tener cargas o eficiencias distintas). 
 
-Cada panel opera con una resistencia de carga fija correspondiente a su 
-punto de máxima potencia (MPP), determinada experimentalmente mediante 
-barrido de resistencia de carga:
-
-| Panel | Potencia MPP | Resistencia de carga |
-|---|---|---|
-| Estático | 520 mW | 40.2 Ω |
-| Seguidor | 420 mW | 56 Ω |
-
-### Modelo de corrección cuadrático
-
-Para la versión 2.0, se ha implementado una **estructura de corrección cuadrática** que permite normalizar la respuesta del panel seguidor ($P_{1}$) respecto al estático ($P_{2}$), compensando diferencias de carga o eficiencia:
-
-$$P_{1\_norm} = a \cdot P_{1}^2 + b \cdot P_{1} + c$$
-
-**Estado actual (v2.0):** 
-Se ha configurado una relación **1:1 ($a=0, b=1, c=0$)** por defecto. Esta decisión permite:
-1. Visualizar los datos reales medidos sin procesamientos experimentales previos.
-2. Contar con una infraestructura lista para inyectar coeficientes precisos ($a, b, c$) una vez se complete la caracterización definitiva en campo.
-
-Esta expresión permitirá calcular la ganancia real del seguimiento en versiones futuras:
+Actualmente, el firmware incorpora una **estructura de compensación cuadrática** parametrizada:
 ```
-ganancia = (P1_norm − P2_real) / P2_real × 100%
+P1_homologada = a·P1² + b·P1 + c
 ```
-donde $P_{1\_norm}$ es la potencia del panel móvil normalizada a la escala del panel fijo.
+
+Para la versión 2.0, se ha optado por mantener una **relación 1:1 (a=0, b=1, c=0)** por defecto. Esto permite que los datos que viajan por MQTT sean la medición directa, dejando lista la infraestructura de cálculo para futuros ajustes.
+
+| Métrica | Estado |
+|---|---|
+| Modelo de homologación | Estructura cuadrática (1:1 por defecto) |
+| Condición de medición | Requiere irradiancia variable (día nublado) para capturar el rango completo |
 
 Si `ganancia > 0`, el seguidor está captando más energía de la que captaría un panel fijo bajo las mismas condiciones. Actualizar los coeficientes es una operación directa en el firmware (`main.c`).
 

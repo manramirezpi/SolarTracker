@@ -64,22 +64,22 @@ La aplicación SeguidorApp ha sido rediseñada con un enfoque de instrumentació
 
 ---
 
-## Resultados y Calibración
+## Homologación y Calibración
 
-Para que la comparación de eficiencia refleje únicamente la ganancia angular del seguimiento, se requiere normalizar la respuesta de los paneles (que pueden tener cargas o eficiencias distintas). 
+Para que la comparación de eficiencia refleje únicamente la ganancia angular del seguimiento, se requiere homologar la respuesta de los paneles (que presentan distinta curva de potencia debido a sus cargas y tolerancias). 
 
-Actualmente, el firmware incorpora una **estructura de corrección cuadrática** parametrizada:
+Actualmente, el firmware incorpora una **estructura de compensación cuadrática** parametrizada:
 ```
-P1_norm = a·P1² + b·P1 + c
+P1_homologada = a·P1² + b·P1 + c
 ```
 
 Para la versión 2.0, se ha optado por mantener una **relación 1:1 (a=0, b=1, c=0)** por defecto. Esto garantiza que los datos mostrados sean los reales medidos, permitiendo que en versiones posteriores (v2.1+) se inyecten los coeficientes definitivos una vez se complete la fase de caracterización experimental.
 
 | Métrica | Estado |
 |---|---|
-| Modelo de normalización | Estructura cuadrática implementada (1:1 por defecto) |
+| Modelo de homologación | Estructura cuadrática (1:1 por defecto) |
 | Ganancia de energía | En medición — datos disponibles en v2.1 |
-| Condición de medición | Pendiente de validación con irradiancia estable |
+| Condición de medición | Requiere irradiancia variable (día nublado) para capturar el rango completo |
 
 *(Las gráficas comparativas de potencia acumulada estarán disponibles en la siguiente iteración del software)*
 
