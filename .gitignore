@@ -6,7 +6,7 @@
 
 # ─── Credenciales de red ────────────────────────
 v2/codigo/esp32/main/config.h
-v2/codigo/SeguidorApp/app/src/main/java/com/curso_simulaciones/seguidorapp/Configuracion.java
+v2/codigo/SeguidorApp/app/src/main/java/com/solartracker/Configuracion.java
 
 
 # ─── ESP-IDF (v2/codigo/esp32) ───────────────────────────────────────────────
