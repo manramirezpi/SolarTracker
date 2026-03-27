@@ -1,6 +1,6 @@
 # SolarTracker v2.0 — Firmware ESP32
 
-Firmware desarrollado con ESP-IDF v5.5.3 para el seguimiento solar astronómico de 2 ejes con monitoreo energético comparativo e integración IoT. Calcula la posición del sol en tiempo real a partir de coordenadas GPS y tiempo UTC, mientras monitorea tres canales de potencia y transmite telemetría vía MQTT.
+Firmware desarrollado con ESP-IDF v5.5.3 para el seguimiento solar astronómico de 2 ejes con monitoreo energético comparativo e integración IoT. Calcula la posición del sol en tiempo real a partir de coordenadas GPS y tiempo UTC, mientras monitorea dos canales de potencia y transmite telemetría vía MQTT.
 
 ---
 
@@ -117,7 +117,7 @@ tarea_principal     1 (baja)    4096        continuo   watchdog y gestión WiFi
 - **Modo búsqueda inicial** — al arrancar sin coordenadas guardadas, los servos barren lentamente en azimut hasta obtener fix GPS.
 
 ### Medición energética
-- **Lectura del INA3221 a 10 Hz por I2C** — tres canales simultáneos: panel seguidor, panel estático y reserva.
+- **Lectura del INA3221 a 10 Hz por I2C** — dos canales activos: panel seguidor (CH1) y panel estático (CH2).
 - **Recuperación autónoma del bus I2C** — ante fallo de comunicación con el INA3221, el firmware reinicializa automáticamente el bus sin detener el seguimiento.
 - **Potencia promedio instantánea**: calculada mediante buffer circular como promedio móvil de los últimos 5 minutos, suaviza variaciones rápidas por nubosidad transitoria.
 - **Energía diaria acumulada (mWh)**: integración continua de potencia a lo largo del día, se reinicia automáticamente al inicio de cada jornada. La comparación entre el acumulado del panel seguidor y el estático es la métrica principal para estimar la ganancia real del seguimiento.
@@ -140,7 +140,7 @@ tarea_principal     1 (baja)    4096        continuo   watchdog y gestión WiFi
 El firmware implementa una **jerarquía de prioridad** para flexibilidad de control:
 
 1. **Modo SERVO MANUAL** — Control directo de azimut y elevación mediante comandos MQTT (ignora el sol).
-2. **Modo SIMULACIÓN** — Reloj interno acelerado por factor configurable (1x a 3600x) para validar trayectorias sin esperar el ciclo diario.
+2. **Modo SIMULACIÓN** — Reloj interno acelerado por factor configurable (1x a 1440x) para validar trayectorias sin esperar el ciclo diario. Permite simular 1 día completo en 1 minuto.
 3. **Modo MANUAL (Fechas/Coordenadas)** — Calcula posición solar con valores inyectados por el usuario (útil para pruebas).
 4. **Modo AUTOMÁTICO (Default)** — Seguimiento solar en tiempo real con datos GPS.
 
@@ -176,7 +176,12 @@ donde $P_{1\_norm}$ es la potencia del panel móvil normalizada a la escala del 
 
 Si `ganancia > 0`, el seguidor está captando más energía de la que captaría un panel fijo bajo las mismas condiciones atmosféricas.
 
-Actualizar los coeficientes es una operación directa en el firmware (`main.c` — líneas 260-262).
+Actualizar los coeficientes es una operación directa en el firmware (`main.c` — líneas 260-262):
+```c
+static float coef_a = 0.0f;  // Término cuadrático
+static float coef_b = 1.0f;  // Término lineal (1:1 por defecto)
+static float coef_c = 0.0f;  // Término constante
+```
 
 ---
 
@@ -207,7 +212,7 @@ El firmware publica un **mensaje LWT con código de estado JSON** al desconectar
   "i2c": 1
 }
 ```
-Este formato permite a la app Android analizar el estado de salud y mostrar un semáforo detallado de diagnóstico.
+Este formato permite a la app Android analizar el estado de salud y detectar qué componente falló específicamente.
 
 ---
 
@@ -248,8 +253,9 @@ Este formato permite a la app Android analizar el estado de salud y mostrar un s
   - **Modo AUTO:** seguimiento solar automático con datos GPS en tiempo real.
   - **Modo MANUAL:** control remoto directo de azimut y elevación mediante comandos MQTT desde la app.
 - **Modo simulación de tiempo:**
-  - Factor de velocidad ajustable (1x a 3600x).
+  - Factor de velocidad ajustable (1x a 1440x).
   - Reloj interno desacoplado del tiempo real para validar trayectorias solares sin esperar el ciclo diario.
+  - Permite simular 1 día completo en 1 minuto (factor 1440x).
   - Útil para pruebas de algoritmo y validación de cobertura hemisférica.
 
 ---

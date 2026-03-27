@@ -2,7 +2,7 @@
 
 Sistema de seguimiento solar astronómico de 2 ejes con monitoreo energético comparativo e infraestructura IoT, desarrollado sobre ESP32 con ESP-IDF v5.5. Permite comparar en tiempo real la eficiencia entre un panel móvil que sigue al sol y uno estático, con visualización y control remoto vía aplicación Android.
 
-Esta versión extiende la v1.0 con conectividad inalámbrica, telemetría sincronizada de potencia en tres canales y una app móvil de instrumentación industrial.
+Esta versión extiende la v1.0 con conectividad inalámbrica, telemetría sincronizada de potencia en dos canales y una app móvil para monitoreo y control.
 
 ---
 
@@ -38,7 +38,7 @@ graph LR
 | MCU | ESP32-WROOM-32 | Unidad de procesamiento principal — Dual-Core 240 MHz |
 | Servomotores (×2) | Tower Pro SG5010 | Control de azimut y elevación |
 | Módulo GPS | u-blox NEO-6M | Geolocalización y tiempo UTC — tramas NMEA-0183 |
-| Monitor de potencia | INA3221 | Medición de voltaje, corriente y potencia en 3 canales |
+| Monitor de potencia | INA3221 | Medición de voltaje, corriente y potencia — 2 canales activos |
 | Optoacopladores (×2) | PC817 | Aislamiento galvánico entre señales PWM del MCU y servos |
 
 ---
@@ -95,7 +95,7 @@ La implementación sigue ocho pasos: tiempo decimal → Día Juliano (J2000.0) �
 - **Control de posición dual:**
   - **Modo AUTO:** seguimiento solar automático con datos GPS en tiempo real.
   - **Modo MANUAL:** control directo de azimut y elevación mediante comandos MQTT desde la app.
-- **Modo simulación de tiempo** — ajuste de velocidad del reloj interno (factor 1x a 3600x) para validar trayectorias solares sin esperar el ciclo diario.
+- **Modo simulación de tiempo** — ajuste de velocidad del reloj interno (factor 1x a 1440x) para validar trayectorias solares aceleradas. Permite simular 1 día completo en 1 minuto.
 
 👉 [Detalles técnicos del firmware](./codigo/esp32/README.md)
 
@@ -103,20 +103,24 @@ La implementación sigue ocho pasos: tiempo decimal → Día Juliano (J2000.0) �
 
 ## App Android
 
-La aplicación **SeguidorApp** ha sido desarrollada con un enfoque de instrumentación industrial, ofreciendo monitoreo en tiempo real, control híbrido (AUTO/MAN), sistema de autodiagnóstico y adquisición de datos para calibración.
+La aplicación **SeguidorApp** permite monitoreo en tiempo real y control remoto del seguidor, con visualización de telemetría a 4 Hz y adquisición de datos para calibración.
 
 ### Funcionalidades principales
 
-- **Dashboard Industrial** — Tabla compacta con mediciones de voltaje, corriente y potencia para 2 paneles, con actualizaciones fluidas a 4 Hz sin salto visual (bypass de Garbage Collector mediante parsing directo sin JSON).
-- **Monitoreo de Salud Inteligente mediante LWT** — Sistema de semáforo global (verde/amarillo/rojo) y panel detallado con desglose de estado: conexión, integridad de memoria NVS, periféricos GPS e I2C INA3221.
-- **Control híbrido AUTO/MAN:**
-  - **Modo AUTO:** el firmware sigue automáticamente al sol con coordenadas GPS.
-  - **Modo MAN:** control remoto directo de azimut y elevación mediante sliders en la app.
-  - Suspensión temporal de telemetría automática tras un comando manual (3 segundos) para evitar rebotes visuales antes de que el hardware responda.
-- **Adquisición de datos para calibración** — Datalogger asíncrono activado por hardware que genera un *batch* sincronizado de 150 lecturas delta, exportable como CSV/.txt para análisis de correlación entre paneles.
-- **Visualización de energía acumulada** — Gráficos comparativos de energía diaria (mWh) para evaluar la ganancia real del seguimiento.
-- **Geolocalización y control de tiempo** — Visualización de coordenadas GPS en tiempo real, ajuste manual de fecha y factor de velocidad para simulación de trayectorias solares.
-- **Medidores analógicos (Gauges)** — Representación visual tipo instrumentación de aviación con buffer circular para suavizado de lecturas ruidosas.
+- **Tabla de telemetría en tiempo real** — Visualización compacta de potencia instantánea, promedio y energía acumulada para 2 paneles, con actualizaciones fluidas a 4 Hz sin saltos visuales (bypass de Garbage Collector mediante parsing directo sin JSON).
+- **Cálculo de ganancia energética** — Comparación porcentual en tiempo real entre la energía acumulada del panel móvil y el estático.
+- **Medidores analógicos (Gauges)** — Visualización de ángulos solares (azimut/elevación) y posición de servos con representación tipo instrumentación analógica. Buffer circular de 10 muestras para suavizado de lecturas ruidosas.
+- **Control remoto de posición:**
+  - Sliders para ajuste manual de azimut (0° a 180°) y elevación (0° a 180°).
+  - Suspensión temporal de actualizaciones automáticas por 3 segundos tras un comando manual para evitar rebotes visuales antes de que el hardware responda.
+- **Control de coordenadas y tiempo:**
+  - Ajuste manual de latitud y longitud para pruebas sin mover el hardware.
+  - Factor de velocidad de simulación (1x a 1440x) mediante slider circular — permite simular 1 día completo en 1 minuto.
+  - Botón "VOLVER A GPS" para restaurar el modo automático con coordenadas reales.
+- **Adquisición de datos para calibración:**
+  - Botón "DESCARGAR" que solicita al ESP32 un batch sincronizado de 150 muestras delta de potencia.
+  - Exportación a archivo CSV con timestamp mediante botón "COMPARTIR".
+  - Permite análisis externo de correlación entre paneles para determinar coeficientes de normalización.
 
 ### Arquitectura de software
 
@@ -133,16 +137,18 @@ SeguidorApp/
 │   ├── GeneradorUI.java           ← componentes visuales aislados de la lógica
 │   ├── GaugeSimple.java           ← medidor analógico con renderizado en Canvas
 │   ├── CircularSlider.java        ← control circular para factor de simulación
+│   ├── Boton.java                 ← botones personalizados
 │   └── DialogoSalir.java          ← confirmación de salida
 └── ActividadSeguidor.java         ← coordinación general y ciclo de vida
 ```
 
 **Decisiones de diseño relevantes:**
 
-- **Parsing sin JSON:** evita presión sobre el Garbage Collector a 4 Hz, reduciendo saltos visuales en la tabla.
+- **Parsing sin JSON para canal rápido (4 Hz):** evita presión sobre el Garbage Collector, reduciendo saltos visuales en la tabla.
 - **Cola concurrente en MQTT:** publicación y recepción en hilo separado, sin bloquear el UI Thread.
 - **Bloqueo post-intervención manual:** suspende actualizaciones automáticas por 3 segundos tras un comando para evitar sobreescritura visual prematura.
 - **GeneradorUI desacoplado:** permite modificar la interfaz sin tocar comunicaciones ni procesamiento de datos.
+- **Variables volatile en AlmacenDatosRAM:** garantiza visibilidad entre el hilo MQTT y el UI Thread.
 
 👉 [Detalles técnicos de la app](./codigo/SeguidorApp/README.md)
 
@@ -182,8 +188,6 @@ ganancia = (P1_norm − P2_real) / P2_real × 100%
 | Modelo de normalización | Estructura cuadrática implementada (1:1 por defecto) |
 | Ganancia de energía | En medición — datos disponibles en v2.1 |
 | Condición de medición | Pendiente de validación con irradiancia estable |
-
-*(Las gráficas comparativas de potencia acumulada estarán disponibles en la siguiente iteración del software)*
 
 ---
 
