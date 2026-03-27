@@ -56,7 +56,7 @@ Desarrollado con ESP-IDF v5.5. El firmware implementa seguimiento astronómico b
 La aplicación SeguidorApp ha sido rediseñada con un enfoque de instrumentación industrial, ofreciendo monitoreo en tiempo real, control directo o simulado y un sistema de autodiagnóstico:
 
 - **Dashboard Industrial**: Tabla compacta con mediciones de voltaje, corriente y potencia, con actualizaciones rápidas a 4 Hz (sin salto visual por bypass de GC).
-- **Monitoreo de Salud Inteligente**: Diagnóstico global mediante LWT (conexión, integridad de memoria NVS, periféricos GPS e I2C) con desglose en panel inferior.
+- **Monitoreo de Estado**: Indicadores de tipo industrial para la conexión del sistema, validez de la señal GPS y el tiempo de actividad del controlador (uptime).
 - **Control híbrido**: Modos AUTO/MAN para posicionamiento manual de azimut y elevación. Suspensión temporal de telemetría automática tras un comando para evitar rebotes visuales.
 - **Adquisición de calibración**: Datalogger hardware-triggered. Genera un *batch* sincronizado de 150 lecturas delta para calibración remota, exportable como CSV/.txt.
 

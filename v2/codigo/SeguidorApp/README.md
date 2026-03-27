@@ -13,7 +13,7 @@ Actuando como la nueva capa de visualización e interacción que reemplaza al LC
 |---|---|
 | Dashboard Industrial | Tabla compacta de parámetros (Voltaje, Corriente, Potencia) para 2 paneles con actualizaciones fluidas a 4 Hz |
 | Control manual remoto | Control híbrido AUTO/MAN para orientar físicamente (azimut/elevación) el seguidor |
-| Monitoreo de Salud LWT | Sistema de semáforo global y panel detallado (bottom sheet) de salud (Conexión, I2C INA3221, GPS, Memoria) |
+| Monitoreo de Estado | Indicadores de conexión MQTT, tiempo de actividad (uptime) y estado de señal GPS |
 | Adquisición de Datos | Datalogger asíncrono activado por hardware (batch .txt de 150 muestras) |
 | Homologación Energética | Relación 1:1 habilitada por defecto. Estructura cuadrática lista para calibración con irradiancia variable. |
 | Geolocalización y Control | Datos de Lat/Lon y ajustes de fecha manuales y velocidad de simulación |
@@ -63,10 +63,9 @@ la aguja sin introducir latencia perceptible.
 en una clase separada, lo que permite modificar la interfaz sin tocar la 
 lógica de comunicaciones ni el procesamiento de datos.
 
-**Gestión de Salud y LWT**: la aplicación integra un sistema integral de monitoreo
-mediante Last Will & Testament (LWT) independiente para App y ESP32. Un panel lateral
-analiza los códigos JSON de estado y pinta un semáforo global para indicar la conexión, 
-fallos en periféricos internos (GPS, I2C INA3221) o problemas de persistencia NVS.
+**Indicadores de Estado**: la aplicación provee telemetría complementaria al monitoreo energético,
+presentando al usuario en qué modo se encuentra el seguidor, si el GPS 
+ha logrado un *fix* válido, y el tiempo de actividad de la sesión (uptime).
 
 ---
 
