@@ -20,7 +20,7 @@ Esta versión extiende la v1.0 con conectividad inalámbrica, telemetría sincro
 
 ## Arquitectura del sistema
 
-El sistema se compone de tres componentes que se comunican de forma bidireccional vía MQTT:
+El sistema se compone de tres elementos que se comunican de forma bidireccional vía MQTT:
 ```mermaid
 graph LR
     H[ESP32 + Sensores] -- telemetría --> B[Broker MQTT]
