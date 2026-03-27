@@ -51,7 +51,7 @@ La aplicación SeguidorApp permite monitoreo en tiempo real y control manual del
 
 - Visualización de potencia instantánea y acumulada (mWh) de ambos paneles
 - Ángulos actuales de azimut y elevación
-- Control manual mediante joystick virtual
+- Control manual mediante sliders virtuales
 - Gráficas comparativas: panel seguidor vs. panel estático
 
 👉 [Detalles técnicos de la app](./codigo/SeguidorApp/README.md)
