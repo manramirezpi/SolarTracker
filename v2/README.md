@@ -109,7 +109,7 @@ La aplicación **SeguidorApp** permite monitoreo en tiempo real y control remoto
 
 - **Tabla de telemetría en tiempo real** — Visualización compacta de potencia instantánea, promedio y energía acumulada para 2 paneles, con actualizaciones fluidas a 4 Hz sin saltos visuales (bypass de Garbage Collector mediante parsing directo sin JSON).
 - **Cálculo de ganancia energética** — Comparación porcentual en tiempo real entre la energía acumulada del panel móvil y el estático.
-- **Medidores analógicos (Gauges)** — Visualización de ángulos solares (azimut/elevación) y posición de servos con representación tipo instrumentación analógica. Buffer circular de 100 muestras para suavizado de lecturas ruidosas.
+- **Medidores analógicos (Gauges)** — Visualización de ángulos solares (azimut/elevación) y posición de servos con representación tipo instrumentación analógica.
 - **Control remoto de posición:**
   - Sliders para ajuste manual de azimut (-90° a +90°) y elevación (0° a 180°).
   - Suspensión temporal de actualizaciones automáticas por 3 segundos tras un comando manual para evitar rebotes visuales antes de que el hardware responda.
