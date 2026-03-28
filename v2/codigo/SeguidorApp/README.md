@@ -20,7 +20,7 @@ Aplicación móvil para monitoreo en tiempo real y control remoto del sistema So
 | Cálculo de ganancia | Comparación porcentual en tiempo real entre energía acumulada del panel móvil vs estático |
 | Control de coordenadas | Ajuste manual de latitud/longitud para pruebas sin mover el hardware físico |
 | Simulación de tiempo | Factor de velocidad 1x a 1440x — permite simular 1 día completo en 1 minuto |
-| Adquisición de datos | Datalogger asíncrono — genera batch de 150 muestras sincronizadas exportable como CSV |
+| Adquisición de datos | Datalogger asíncrono — genera batch de 150 muestras sincronizadas exportable como CSV para análisis y comparaciones |
 | Estado GPS | Indicador visual de señal GPS (ESTABLE/BUSCANDO) |
 
 ---
@@ -81,7 +81,7 @@ SeguidorApp/
 - **Adquisición de datos para calibración:**
   - Botón "DESCARGAR" que solicita al ESP32 un batch sincronizado de 150 muestras delta de potencia.
   - Exportación a archivo CSV con timestamp mediante botón "COMPARTIR".
-  - Permite análisis externo de correlación entre paneles para determinar coeficientes de normalización cuadrática.
+  - Permite análisis externo de correlación entre paneles para determinar coeficientes de normalización y realizar comparaciones de rendimiento.
 - **Indicador de estado GPS:**
   - Visualización en tiempo real del estado de la señal GPS (SEÑAL ESTABLE / BUSCANDO...).
   - Código de color: verde para señal válida, amarillo durante búsqueda.

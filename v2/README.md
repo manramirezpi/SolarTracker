@@ -120,7 +120,7 @@ La aplicación **SeguidorApp** permite monitoreo en tiempo real y control remoto
 - **Adquisición de datos para calibración:**
   - Botón "DESCARGAR" que solicita al ESP32 un batch sincronizado de 150 muestras delta de potencia.
   - Exportación a archivo CSV con timestamp mediante botón "COMPARTIR".
-  - Permite análisis externo de correlación entre paneles para determinar coeficientes de normalización.
+  - Permite análisis externo de correlación entre paneles para determinar coeficientes de normalización y realizar comparaciones de rendimiento.
 
 ### Arquitectura de software
 
