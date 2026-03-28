@@ -187,7 +187,7 @@ ganancia = (P1_norm − P2_real) / P2_real × 100%
 |---|---|
 | Modelo de normalización | Estructura cuadrática implementada (1:1 por defecto) |
 | Ganancia de energía | En medición — datos disponibles en v2.1 |
-| Condición de medición | Pendiente de validación con irradiancia estable |
+| Condición de medición | Pendiente de validación con irradiancia variable |
 
 ---
 
