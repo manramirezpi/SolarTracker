@@ -21,8 +21,8 @@ Firmware desarrollado con ESP-IDF v5.5.3 para el seguimiento solar astronómico 
 |---|---|---|
 | Servo azimut | 19 | PWM — LEDC canal 0 |
 | Servo elevación | 18 | PWM — LEDC canal 1 |
-| GPS RX | 17 | UART2 — 9600 baud |
-| GPS TX | 16 | UART2 — no utilizado |
+| GPS TX (del ESP32) | 16 | UART2 — no utilizado |
+| GPS RX (del ESP32) | 17 | UART2 — 9600 baud |
 | I2C SDA | 21 | Bus datos — INA3221 |
 | I2C SCL | 22 | Bus reloj — INA3221 |
 
@@ -76,23 +76,23 @@ seguimiento es mecánica, no algorítmica.
 ```
 Tarea               Prioridad   Stack (B)    Periodo    Función
 ─────────────────────────────────────────────────────────────────
-tarea_gps           4 (alta)    4096        continuo   parseo NMEA y cálculo solar
-tarea_ina           3           2048        100ms      lectura INA3221 a 10 Hz
-tarea_mqtt_fast     3           3072        250ms      publica ángulos y potencia
-tarea_mqtt_slow     2           3072        1000ms     publica GPS y diagnóstico
-tarea_servos        3           2048        20ms       actualización PWM con rampa
-tarea_principal     1 (baja)    4096        continuo   watchdog y gestión WiFi
+tarea_principal     5 (alta)    8192        continuo   control, telemetría MQTT (4Hz/1Hz)
+tarea_gps           4           4096        continuo   parseo NMEA y cálculo solar
+tarea_ina           3           4096        100ms      lectura INA3221 a 10 Hz
+timer_movimiento    -           -           20ms       actualización PWM con rampa (ISR)
 ```
+
+**Nota:** La publicación MQTT (rápida y lenta) ocurre dentro de `tarea_principal`, no en tareas separadas. El movimiento de servos se gestiona mediante un timer de hardware (ISR) que se ejecuta cada 20 ms.
 
 ### Sincronización de tareas
 
 | Mecanismo | Uso | Justificación |
 |---|---|---|
-| Cola `cola_gps` (longitud 2) | Comunicación GPS → tarea_principal mediante índice de buffer ping-pong | Evita copiar cadenas NMEA completas entre tareas — solo se transfiere el índice del buffer recién llenado |
+| Cola `cola_gps` (longitud 2) | Comunicación tarea_gps → tarea_principal mediante índice de buffer ping-pong | Evita copiar cadenas NMEA completas entre tareas — solo se transfiere el índice del buffer recién llenado (120 bytes ahorrados por transferencia) |
 | Event Group `wifi_event_group` | Sincronización de estado WiFi con bits `WIFI_CONNECTED_BIT` y `WIFI_FAIL_BIT` | Permite bloqueo sin consumo de CPU durante la inicialización de red |
-| Variables `volatile` | `pos_obj_az` y `pos_obj_el` compartidas entre tarea_principal y callback de timer | El callback opera como ISR — `volatile` fuerza lectura desde RAM y previene valores cacheados por el compilador |
+| Variables `volatile` | `pos_obj_az` y `pos_obj_el` compartidas entre tarea_principal y timer ISR | El timer opera como interrupción — `volatile` fuerza lectura desde RAM y previene valores cacheados por el compilador |
 | Task pinning (Core 1) | Todas las tareas de control ancladas con `xTaskCreatePinnedToCore` | El Core 0 gestiona el stack WiFi/BT de ESP-IDF — el anclaje al Core 1 aísla el cálculo astronómico y el control de servos de picos de tráfico de red |
-| TWDT | Cada tarea reporta actividad mediante `esp_task_wdt_reset()` | Detecta bloqueos individuales por tarea sin necesidad de reiniciar el sistema completo |
+| TWDT | Cada tarea reporta actividad mediante `esp_task_wdt_reset()` | Detecta bloqueos individuales por tarea — timeout de 20 segundos con reinicio automático |
 
 ---
 
@@ -114,7 +114,7 @@ tarea_principal     1 (baja)    4096        continuo   watchdog y gestión WiFi
   - Al arrancar, el sistema recupera las últimas coordenadas válidas desde flash e inicia el seguimiento en cuanto el GPS sincroniza el reloj UTC, sin esperar a que se establezca un fix de posición completo.
   - Las coordenadas en NVS se actualizan solo cuando el cambio supera 0.2° para minimizar escrituras en flash y extender su vida útil.
 - **Continuidad de operación ante pérdida de señal** — usa último fix válido hasta recuperar GPS.
-- **Modo búsqueda inicial** — al arrancar sin coordenadas guardadas, los servos barren lentamente en azimut hasta obtener fix GPS.
+- **Modo búsqueda inicial** — al arrancar sin coordenadas guardadas, los servos barren en azimut (45° cada 10 segundos) hasta obtener fix GPS.
 
 ### Medición energética
 - **Lectura del INA3221 a 10 Hz por I2C** — dos canales activos: panel seguidor (CH1) y panel estático (CH2).
@@ -239,7 +239,7 @@ Este formato permite a la app Android analizar el estado de salud y detectar qu�
   - Cuando la elevación solar es negativa (sol bajo el horizonte), los servos se posicionan a 90°.
   - Protege el panel de posiciones extremas y reduce consumo durante la noche.
 - **Modo búsqueda inicial:**
-  - Al arrancar sin coordenadas GPS previas, los servos barren lentamente en azimut (±0.5° cada 3 segundos).
+  - Al arrancar sin coordenadas GPS previas, los servos barren en azimut (45° cada 10 segundos) entre -90° y +90°.
   - Evita posiciones indefinidas hasta obtener fix GPS válido.
 - **Arquitectura FreeRTOS multiproceso:**
   - Todas las tareas de control (GPS, servos, INA, MQTT) corren en **Core 1**.

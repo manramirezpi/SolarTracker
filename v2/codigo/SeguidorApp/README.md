@@ -15,8 +15,8 @@ Aplicación móvil para monitoreo en tiempo real y control remoto del sistema So
 | Función | Descripción |
 |---|---|
 | Tabla de telemetría | Visualización compacta de potencia instantánea, promedio y energía acumulada para 2 paneles con actualizaciones a 4 Hz |
-| Medidores analógicos | Gauges para visualización de ángulos solares (azimut/elevación) y posición de servos con suavizado de lecturas |
-| Control remoto | Sliders para ajuste manual de azimut (0° a 180°) y elevación (0° a 180°) con suspensión temporal de actualizaciones |
+| Medidores analógicos | Gauges para visualización de ángulos solares (azimut/elevación) y posición de servos — buffer circular de 100 muestras |
+| Control remoto | Sliders para ajuste manual de azimut (-90° a +90°) y elevación (0° a 180°) con suspensión temporal de actualizaciones |
 | Cálculo de ganancia | Comparación porcentual en tiempo real entre energía acumulada del panel móvil vs estático |
 | Control de coordenadas | Ajuste manual de latitud/longitud para pruebas sin mover el hardware físico |
 | Simulación de tiempo | Factor de velocidad 1x a 1440x — permite simular 1 día completo en 1 minuto |
@@ -53,7 +53,7 @@ SeguidorApp/
 
 **Bloqueo post-intervención manual:** tras un comando manual del usuario (cambio de ángulo, fecha o coordenadas), la app suspende las actualizaciones automáticas por 3 segundos (`MANUAL_LOCKOUT_MS`) para evitar que la telemetría entrante sobreescriba visualmente el ajuste antes de que el hardware responda. Este mecanismo elimina los rebotes visuales y mejora la percepción de control directo.
 
-**Buffer circular para promedios móviles:** los medidores analógicos (gauges) usan un buffer circular de las últimas 10 lecturas para suavizar valores ruidosos, evitando oscilaciones bruscas en la aguja sin introducir latencia perceptible.
+**Buffer circular para promedios móviles:** los medidores analógicos (gauges) usan un buffer circular de las últimas 100 lecturas para suavizar valores ruidosos, evitando oscilaciones bruscas en la aguja sin introducir latencia perceptible.
 
 **GeneradorUI desacoplado:** todos los componentes visuales están contenidos en una clase separada (`GeneradorUI.java`), lo que permite modificar la interfaz sin tocar la lógica de comunicaciones ni el procesamiento de datos. Facilita el mantenimiento y testing.
 
@@ -68,10 +68,10 @@ SeguidorApp/
 - **Medidores analógicos (Gauges):**
   - Visualización de ángulos solares calculados (azimut/elevación) y posición real de los servos.
   - Representación tipo instrumentación analógica con aguja y escala graduada.
-  - Renderizado directo en Canvas de Android con buffer circular de 10 muestras para suavizado.
+  - Renderizado directo en Canvas de Android con buffer circular de 100 muestras para suavizado.
   - Elimina saltos bruscos en lecturas ruidosas sin introducir lag perceptible.
 - **Control remoto de posición:**
-  - Sliders horizontales para ajuste manual de azimut (0° a 180°) y elevación (0° a 180°).
+  - Sliders horizontales para ajuste manual de azimut (-90° a +90°) y elevación (0° a 180°).
   - Suspensión temporal de actualizaciones automáticas por 3 segundos tras un comando para evitar rebotes visuales antes de que el hardware responda.
   - Sincronización automática de sliders con la posición real del hardware tras el periodo de gracia.
 - **Control de coordenadas y tiempo:**
