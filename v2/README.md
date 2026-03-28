@@ -55,8 +55,8 @@ graph LR
 |---|---|---|
 | Servo azimut | 19 | PWM — LEDC canal 0 |
 | Servo elevación | 18 | PWM — LEDC canal 1 |
-| GPS TX (del ESP32) | 16 | UART2 — no utilizado |
-| GPS RX (del ESP32) | 17 | UART2 — 9600 baud |
+| GPS TX | 16 | UART2 — no utilizado |
+| GPS RX | 17 | UART2 — 9600 baud |
 | I2C SDA | 21 | Bus datos — INA3221 |
 | I2C SCL | 22 | Bus reloj — INA3221 |
 
