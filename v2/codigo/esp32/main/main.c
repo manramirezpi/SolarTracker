@@ -39,7 +39,7 @@ static const char *TAG = "SOLAR";
 // ═══════════════════════════════════════════════════════════════════════════
 #include "config.h"
 
-#define MQTT_TOPIC_PUB_FAST "solar/status/fast" // 10Hz: Ángulos y Potencia Instantánea
+#define MQTT_TOPIC_PUB_FAST "solar/status/fast" // 4Hz: Ángulos y Potencia Instantánea
 #define MQTT_TOPIC_PUB_SLOW "solar/status/slow" // 1Hz: GPS, Hora, Promedios e Info
 #define MQTT_TOPIC_SUB "solar/sub"              // ESP32 escucha comandos aquí
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1377,7 +1377,7 @@ static void Publicar_Estado_Rapido_MQTT(void) {
   float servo_az_deg = (1500.0f - (float)pwm_az_actual) / FACTOR_CONVERSION;
   float servo_el_deg = ((float)(pwm_el_actual - 500)) / FACTOR_CONVERSION;
 
-  char json[256]; // JSON compacto para alta frecuencia (10Hz)
+  char json[256]; // JSON compacto para alta frecuencia (4Hz)
   snprintf(json, sizeof(json),
            "{"
            "\"sol\":{\"az\":%.2f,\"el\":%.2f},"
