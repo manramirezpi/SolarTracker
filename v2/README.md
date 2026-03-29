@@ -8,7 +8,7 @@ Esta versión extiende la v1.0 con conectividad inalámbrica, telemetría sincro
 
 ## Demo
 
-*[Video del sistema en operación — próximamente]*
+*[Video del sistema en operación — Programado para la versión estable v2.1]*
 
 ---
 
