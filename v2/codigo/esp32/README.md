@@ -15,6 +15,13 @@ Firmware desarrollado con ESP-IDF v5.5.3 para el seguimiento solar astronómico 
 
 ---
 
+## Diagrama de conexiones / Esquemático
+
+![Esquemático del circuito](../../hardware/esquematico.png)
+> **Nota:** El archivo editable de Fritzing (`v2.0.fzz`) y el montaje físico están disponibles en [`/hardware`](../../hardware).
+
+---
+
 ## Pinout
 
 | Función | GPIO | Detalle |

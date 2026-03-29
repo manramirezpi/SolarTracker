@@ -45,7 +45,17 @@ graph LR
 
 ## Diagrama de conexiones
 
-*[Diagrama de conexiones disponible en v2.1]*
+![Esquemático del circuito](./hardware/esquematico.png)
+> **Nota:** El archivo original editable de Fritzing (`v2.0.fzz`) y las fotografías del hardware se encuentran en el directorio [`/hardware`](./hardware).
+
+### Montaje físico (Prototipo)
+
+<p align="center">
+  <img src="./hardware/montaje_completo_1.jpeg" width="45%" title="Montaje completo con procesador y alimentación">
+  <img src="./hardware/detalle_cableado.jpeg" width="45%" title="Detalle del cableado y etapa de optoacoplamiento">
+</p>
+
+*Desarrollo sobre protoboard: Izquierda: Integración de la etapa de alimentación (Buck LM2596), MCU (ESP32) y sensor de potencia (INA3221). Derecha: Cableado base mostrando la fase de optoacoplamiento (PC817) para el control PWM de los servomotores.*
 
 ---
 
