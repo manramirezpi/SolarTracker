@@ -1,4 +1,4 @@
-package com.curso_simulaciones.seguidorapp.utilidades;
+package com.solartracker.utilidades;
 
 import android.app.Activity;
 import android.graphics.Color;
@@ -14,8 +14,9 @@ import android.widget.ProgressBar;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.FrameLayout;
+import android.widget.ScrollView;
 
-import com.curso_simulaciones.seguidorapp.datos.AlmacenDatosRAM;
+import com.solartracker.datos.AlmacenDatosRAM;
 
 /**
  * Clase encargada de empaquetar, instancias y manipular la interfaz gráfica (UI).
@@ -112,13 +113,13 @@ public class GeneradorUI {
         botonConectar.setTextColor(Color.WHITE);
         botonConectar.setAllCaps(false);
         botonConectar.setTypeface(Typeface.SANS_SERIF, Typeface.BOLD);
-        botonConectar.getBackground().setColorFilter(COLOR_ACCENT, PorterDuff.Mode.MULTIPLY);
+        botonConectar.getBackground().setColorFilter(COLOR_CONTROL_ACCENT, PorterDuff.Mode.MULTIPLY);
 
         botonResetGPS = new Button(actividad);
         botonResetGPS.setText("Sincronizar GPS");
         botonResetGPS.setAllCaps(false);
         botonResetGPS.setTextSize(12);
-        botonResetGPS.setTextColor(COLOR_ACCENT);
+        botonResetGPS.setTextColor(COLOR_CONTROL_ACCENT);
 
         botonTemp = new Button(actividad);
         botonTemp.setText("Descargar Datos");
@@ -283,21 +284,23 @@ public class GeneradorUI {
         
         main.addView(topBar);
         
-        // --- CONTENT AREA ---
+        // --- CONTENT AREA (SCROLLABLE) ---
+        ScrollView scroll = new ScrollView(actividad);
         LinearLayout content = new LinearLayout(actividad);
         content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(dp(16), dp(16), dp(16), dp(16));
 
-        // --- ZONA DE MONITOREO (FONDO BLANCO) ---
+        // --- ZONA DE MONITOREO ---
         content.addView(crearTablaTracking());
         content.addView(gapV(24));
         content.addView(crearTablaPotencia());
         content.addView(gapV(24));
 
-        // --- ZONA DE CONTROL (FONDO GRIS + BORDE AZUL) ---
+        // --- ZONA DE CONTROL ---
         content.addView(crearZonaControl());
-        
-        main.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
+
+        scroll.addView(content);
+        main.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
 
         // --- FOOTER ---
         LinearLayout footer = new LinearLayout(actividad);
@@ -327,7 +330,7 @@ public class GeneradorUI {
         return main;
     }
 
-    private LinearLayout crearZonaControl() {
+    private View crearZonaControl() {
         LinearLayout container = new LinearLayout(actividad);
         container.setOrientation(LinearLayout.VERTICAL);
         container.setBackgroundColor(COLOR_CONTROL_BG);
@@ -380,10 +383,10 @@ public class GeneradorUI {
     private LinearLayout crearTablaTracking() {
         LinearLayout l = new LinearLayout(actividad);
         l.setOrientation(LinearLayout.VERTICAL);
-        l.addView(crearFila("SISTEMA DE SEGUIMIENTO", "Solar", "Servo", "Error", true));
+        l.addView(crearFila("SISTEMA DE SEGUIMIENTO", "Solar", "Servo", "Error", "", true));
         l.addView(gapV(8));
-        l.addView(crearFila("Azimut", solAz, servoAz, errAz));
-        l.addView(crearFila("Elevación", solEl, servoEl, errEl));
+        l.addView(crearFila("Azimut", solAz, servoAz, errAz, null));
+        l.addView(crearFila("Elevación", solEl, servoEl, errEl, null));
         return l;
     }
 
@@ -456,7 +459,7 @@ public class GeneradorUI {
         l.setOrientation(LinearLayout.VERTICAL);
         TextView t = new TextView(actividad);
         t.setText("UBICACIÓN");
-        t.setTextColor(COLOR_ACCENT);
+        t.setTextColor(COLOR_CONTROL_ACCENT);
         t.setTextSize(11);
         t.setTypeface(null, Typeface.BOLD);
         l.addView(t);
@@ -525,7 +528,7 @@ public class GeneradorUI {
 
     private GradientDrawable crearFondoCard() {
         GradientDrawable gd = new GradientDrawable();
-        gd.setColor(COLOR_CARD);
+        gd.setColor(COLOR_FONDO);
         gd.setCornerRadius(dp(12));
         gd.setStroke(dp(1), COLOR_BORDE);
         return gd;

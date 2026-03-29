@@ -1,4 +1,4 @@
-package com.curso_simulaciones.seguidorapp;
+package com.solartracker;
 
 import android.content.Context;
 
@@ -21,6 +21,6 @@ public class ExampleInstrumentedTest {
     public void useAppContext() {
         // Context of the app under test.
         Context appContext = InstrumentationRegistry.getInstrumentation().getTargetContext();
-        assertEquals("com.curso_simulaciones.seguidorapp", appContext.getPackageName());
+        assertEquals("com.solartracker", appContext.getPackageName());
     }
 }

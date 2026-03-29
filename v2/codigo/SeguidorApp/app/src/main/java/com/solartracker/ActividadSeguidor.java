@@ -1,17 +1,18 @@
-package com.curso_simulaciones.seguidorapp;
+package com.solartracker;
 
 import android.app.Activity;
 import android.graphics.Color;
+import android.graphics.PorterDuff;
 import android.os.Bundle;
 import android.os.Handler;
 import android.view.ViewGroup;
 import android.widget.SeekBar;
 
-import com.curso_simulaciones.seguidorapp.comunicaciones.ClientePubSubMQTT;
-import com.curso_simulaciones.seguidorapp.datos.AlmacenDatosRAM;
-import com.curso_simulaciones.seguidorapp.datos.ProcesadorTelemetria;
-import com.curso_simulaciones.seguidorapp.utilidades.DialogoSalir;
-import com.curso_simulaciones.seguidorapp.utilidades.GeneradorUI;
+import com.solartracker.comunicaciones.ClientePubSubMQTT;
+import com.solartracker.datos.AlmacenDatosRAM;
+import com.solartracker.datos.ProcesadorTelemetria;
+import com.solartracker.utilidades.DialogoSalir;
+import com.solartracker.utilidades.GeneradorUI;
 import com.google.android.material.snackbar.Snackbar;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
 import android.widget.ProgressBar;
@@ -22,6 +23,8 @@ import android.view.View;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.PorterDuff;
 import android.util.Log;
+import org.json.JSONException;
+import org.json.JSONObject;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.HashMap;
@@ -51,8 +54,7 @@ import java.util.List;
  * patrón MVC/MVP).
  * 
  * Tras el refactoring arquitectónico de v2.0, esta clase ya no maneja la
- * instanciación
- * visual ni el procesamiento pesado de tramas de telemetría.
+ * instanciación visual ni el procesamiento pesado de tramas de telemetría.
  * 
  * Sus tres responsabilidades únicas (Single-Responsibility) son:
  * 1. Gestionar el ciclo de vida de la Actividad en Android (onCreate,
@@ -109,9 +111,6 @@ public class ActividadSeguidor extends Activity implements Runnable {
             if (!AlmacenDatosRAM.conectado) {
                 AlmacenDatosRAM.resetStats(); 
                 cliente.conectar();
-                ui.botonConectar.setEnabled(false);
-                AlmacenDatosRAM.conectado_PubSub = "CONECTANDO...";
-                connectionStartTime = System.currentTimeMillis();
             } else {
                 cliente.desconectar();
                 AlmacenDatosRAM.conectado = false;
@@ -270,6 +269,19 @@ public class ActividadSeguidor extends Activity implements Runnable {
         });
 
         ui.botonShare.setOnClickListener(v -> generarYCompartirCSV());
+
+        // Selectores de Modo
+        ui.btnAuto.setOnClickListener(v -> {
+            AlmacenDatosRAM.modo = "AUTO";
+            publicarComando("set_mode", 1, true); // 1 = AUTO
+            actualizarEstadoModo(true);
+        });
+
+        ui.btnMan.setOnClickListener(v -> {
+            AlmacenDatosRAM.modo = "MANUAL";
+            publicarComando("set_mode", 0, true); // 0 = MANUAL
+            actualizarEstadoModo(false);
+        });
     }
 
     private void generarYCompartirCSV() {
@@ -478,14 +490,20 @@ public class ActividadSeguidor extends Activity implements Runnable {
     }
 
     private void actualizarEstadoModo(boolean isAuto) {
+        // Shading para botones de modo
         ui.btnAuto.setTextColor(isAuto ? Color.WHITE : ui.COLOR_TEXTO_SEC);
-        ui.btnAuto.getBackground().setColorFilter(isAuto ? ui.COLOR_CONTROL_ACCENT : Color.LTGRAY, PorterDuff.Mode.MULTIPLY);
+        if (ui.btnAuto.getBackground() != null)
+            ui.btnAuto.getBackground().setColorFilter(isAuto ? ui.COLOR_CONTROL_ACCENT : Color.LTGRAY, PorterDuff.Mode.MULTIPLY);
+        
         ui.btnMan.setTextColor(!isAuto ? Color.WHITE : ui.COLOR_TEXTO_SEC);
-        ui.btnMan.getBackground().setColorFilter(!isAuto ? ui.COLOR_CONTROL_ACCENT : Color.LTGRAY, PorterDuff.Mode.MULTIPLY);
+        if (ui.btnMan.getBackground() != null)
+            ui.btnMan.getBackground().setColorFilter(!isAuto ? ui.COLOR_CONTROL_ACCENT : Color.LTGRAY, PorterDuff.Mode.MULTIPLY);
 
-        // Bloquear/Desbloquear sliders manuales según el modo
+        // Sombrear sliders (Alpha + Disable)
         ui.sliderManualAz.setEnabled(!isAuto);
         ui.sliderManualEl.setEnabled(!isAuto);
+        ui.sliderManualAz.setAlpha(isAuto ? 0.3f : 1.0f);
+        ui.sliderManualEl.setAlpha(isAuto ? 0.3f : 1.0f);
         ui.labelManualAz.setAlpha(isAuto ? 0.3f : 1.0f);
         ui.labelManualEl.setAlpha(isAuto ? 0.3f : 1.0f);
     }
@@ -517,8 +535,8 @@ public class ActividadSeguidor extends Activity implements Runnable {
     public void run() {
         while (threadRunning) {
             try {
-                // Aumentamos frecuencia a 20Hz (50ms) para procesar rápido la cola
-                Thread.sleep(50);
+                // Frecuencia optimizada para dispositivos de bajos recursos (4Hz)
+                Thread.sleep(250);
                 boolean uiRequiereUpdate = false;
                 String data;
                 // Drena la cola completamente antes de actualizar la UI
@@ -647,14 +665,18 @@ public class ActividadSeguidor extends Activity implements Runnable {
             } else {
                 ui.botonConectar.setText("CONECTAR");
                 ui.botonConectar.setEnabled(true);
-                ui.botonConectar.getBackground().setColorFilter(ui.COLOR_CONTROL_ACCENT, PorterDuff.Mode.MULTIPLY);
+                if (ui.botonConectar.getBackground() != null) {
+                    ui.botonConectar.getBackground().setColorFilter(ui.COLOR_CONTROL_ACCENT, PorterDuff.Mode.MULTIPLY);
+                }
                 ui.progressConectando.setVisibility(View.GONE);
                 ui.actualizarEstadoGlobal(-1, "DESCONECTADO");
             }
         } else {
             ui.botonConectar.setText("DESCONECTAR");
             ui.botonConectar.setEnabled(true);
-            ui.botonConectar.getBackground().setColorFilter(ui.COLOR_HEALTH_CRIT, PorterDuff.Mode.MULTIPLY);
+            if (ui.botonConectar.getBackground() != null) {
+                ui.botonConectar.getBackground().setColorFilter(ui.COLOR_HEALTH_CRIT, PorterDuff.Mode.MULTIPLY);
+            }
             ui.progressConectando.setVisibility(View.GONE);
 
             long diffGlobal = (System.currentTimeMillis() - AlmacenDatosRAM.currentHealth.timestampMs) / 1000;
@@ -696,7 +718,6 @@ public class ActividadSeguidor extends Activity implements Runnable {
         Snackbar sb = Snackbar.make(findViewById(android.R.id.content), msg, Snackbar.LENGTH_LONG);
         sb.setBackgroundTint(AlmacenDatosRAM.health_global == 2 ? ui.COLOR_HEALTH_CRIT : ui.COLOR_HEALTH_WARN);
         sb.show();
-    }
     }
 
     @Override

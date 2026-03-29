@@ -1,11 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
-    package="com.curso_simulaciones.seguidorapp">
+    android:installLocation="auto">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:allowBackup="true"
@@ -15,7 +17,9 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.SeguidorApp">
+        android:theme="@style/Theme.SeguidorApp"
+        android:usesCleartextTraffic="true"
+        tools:replace="android:allowBackup,android:dataExtractionRules,android:fullBackupContent">
 
         <activity
             android:name=".ActividadSeguidor"
@@ -27,16 +31,18 @@
             </intent-filter>
         </activity>
 
-        <service android:name="org.eclipse.paho.android.service.MqttService" />
+
 
         <provider
             android:name="androidx.core.content.FileProvider"
-            android:authorities="com.curso_simulaciones.seguidorapp.fileprovider"
+            android:authorities="com.solartracker.fileprovider"
             android:exported="false"
-            android:grantUriPermissions="true">
+            android:grantUriPermissions="true"
+            tools:replace="android:authorities">
             <meta-data
                 android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/file_paths" />
+                android:resource="@xml/file_paths"
+                tools:replace="android:resource" />
         </provider>
 
     </application>

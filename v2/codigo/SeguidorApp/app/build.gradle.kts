@@ -3,13 +3,13 @@ plugins {
 }
 
 android {
-    namespace = "com.curso_simulaciones.seguidorapp"
-    compileSdk = 36
+    namespace = "com.solartracker"
+    compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.curso_simulaciones.seguidorapp"
+        applicationId = "com.solartracker"
         minSdk = 24
-        targetSdk = 32
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0"
 
@@ -40,5 +40,5 @@ dependencies {
     androidTestImplementation(libs.espresso.core)
     implementation("com.github.hannesa2:paho.mqtt.android:3.3.5")
     implementation("com.github.PhilJay:MPAndroidChart:v3.1.0")
-    implementation("androidx.legacy:legacy-support-v4:1.0.0")
+
 }

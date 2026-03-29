@@ -1,4 +1,4 @@
-package com.curso_simulaciones.seguidorapp.datos;
+package com.solartracker.datos;
 
 import org.json.JSONObject;
 import java.io.File;
