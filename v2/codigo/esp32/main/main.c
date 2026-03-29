@@ -18,6 +18,7 @@
 #include "driver/i2c.h"
 #include "driver/ledc.h"
 #include "driver/uart.h"
+#include "driver/gpio.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
@@ -30,6 +31,11 @@
 #include "freertos/task.h"
 #include "mqtt_client.h"
 #include "esp_spiffs.h"
+#include "nvs_flash.h"
+#include "nvs.h"
+#include "esp_random.h"
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "config.h"
 #include "health.h"
@@ -56,8 +62,9 @@ static const char *TAG = "SOLAR";
 // ─── Pines ───────────────────────────────────────────────────────────────────
 #define PIN_SERVO_AZIMUT 19
 #define PIN_SERVO_ELEVACION 18
-#define PIN_GPS_RX 17
-#define PIN_GPS_TX 16
+#define PIN_GPS_RX 16 // Pin RX2 físico (ESP recibe)
+#define PIN_GPS_TX 17 // Pin TX2 físico (ESP transmite)
+#define PIN_LED_USUARIO 2
 
 // ─── PWM Servos (Control por Hardware LEDC) ──────────────────────────────────
 #define SERVO_FREQ_HZ 50 // Frecuencia maestra
@@ -188,6 +195,10 @@ typedef struct {
   uint16_t anio_manual;
   float ser_az_manual;        // Ángulo físico objetivo para modo manual
   float ser_el_manual;        // Ángulo físico objetivo para modo manual
+  int factor_velocidad;
+  uint8_t simulacion_activa;
+  LocalTime_t tiempo_interno;
+  int64_t ultimo_tick_us;
 } SystemControl_t;
 
 // ─── Variables globales ──────────────────────────────────────────────────────
@@ -344,7 +355,7 @@ static void Calcular_Hora_Local(LocalTime_t *local);
 static uint8_t es_bisiesto(int ano);
 static void Actualizar_Coordenadas_Calculo(void);
 static void Gestionar_Tiempo_Sistema(void);
-static void Incrementar_Tiempo_Simulado(LocalTime_t *t, int segundos);
+// static void Incrementar_Tiempo_Simulado(LocalTime_t *t, int segundos);
 //static void Publicar_Estado_MQTT(void);
 static void Publicar_Estado_Rapido_MQTT(void);
 static void Publicar_Estado_Lento_MQTT(void);
@@ -355,12 +366,13 @@ static void wifi_init(void);
 static void mqtt_init(void);
 static void tarea_gps(void *arg);
 static void tarea_principal(void *arg);
+static void tarea_seguimiento(void *arg);
 static void timer_movimiento_callback(void *arg);
 static void Publicar_Batch_Potencia_MQTT(void);
 static void Datalogger_Init(void);
 static void Datalogger_Escribir_Punto(void);
 static void Datalogger_Tarea_Descarga(void *arg);
-static int Datalogger_Contar_Pendientes(void);
+static int Datalogger_Contar_Pendientes(void) __attribute__((unused));
 static void Datalogger_Truncar_Corrupto(const char* path);
 static void Procesar_Status_App(const char *datos, int len);
 static void Procesar_ACK_Datalogger(const char *datos, int len);
@@ -435,6 +447,11 @@ void app_main(void) {
   // Configura la interfaz serial
   gps_uart_init();
 
+  // Configura el LED de usuario
+  gpio_reset_pin(PIN_LED_USUARIO);
+  gpio_set_direction(PIN_LED_USUARIO, GPIO_MODE_OUTPUT);
+  gpio_set_level(PIN_LED_USUARIO, 0);
+
   // I2C e inicialización del bus
   i2c_config_t i2c_conf = {.mode = I2C_MODE_MASTER,
                            .sda_io_num = PIN_SDA,
@@ -491,36 +508,38 @@ void app_main(void) {
 
 static void tarea_gps(void *arg) {
   esp_task_wdt_add(NULL);
-  uint8_t byte;
+  uint8_t temp_buf[128];
   static int rx_index = 0;
 
   while (1) {
     esp_task_wdt_reset(); // Alimentar al perro al inicio de cada ciclo
-    // Extracción bloqueante desde el Ring Buffer del UART gestionado por ISR
-    int len = uart_read_bytes(GPS_UART_NUM, &byte, 1, pdMS_TO_TICKS(100));
-    if (len <= 0)
-      continue;
+    
+    // Extracción por bloques desde el Ring Buffer para evitar cuellos de botella del RTOS
+    int len = uart_read_bytes(GPS_UART_NUM, temp_buf, sizeof(temp_buf), pdMS_TO_TICKS(100));
+    
+    if (len > 0) {
+      for (int i = 0; i < len; i++) {
+        uint8_t byte = temp_buf[i];
 
-    // Transicionado a fin de trama (Line Feed NMEA)
-    if (byte == '\n') {
-      gps_ping_pong[buffer_escritura_idx][rx_index] = '\0';
-      if (rx_index > 0) {
-        uint8_t idx_listo = buffer_escritura_idx;
-        // Inyectar a la estructura IPC asíncrona por paso de valor
-        if (xQueueSend(cola_gps, &idx_listo, 0) == pdTRUE) {
-          // Conmuta la memoria activa (XOR semántico) sólo tras la validación
-          // de recepción
-          buffer_escritura_idx =
-              (buffer_escritura_idx + 1) % 2; // Alterna el buffer
+        // Transicionado a fin de trama (Line Feed NMEA)
+        if (byte == '\n') {
+          gps_ping_pong[buffer_escritura_idx][rx_index] = '\0';
+          if (rx_index > 0) {
+            uint8_t idx_listo = buffer_escritura_idx;
+            // Inyectar a la estructura IPC asíncrona por paso de valor
+            if (xQueueSend(cola_gps, &idx_listo, 0) == pdTRUE) {
+              // Conmuta la memoria activa (XOR semántico) sólo tras la validación de recepción
+              buffer_escritura_idx = (buffer_escritura_idx + 1) % 2; // Alterna el buffer
+            }
+          }
+          rx_index = 0;
+        } else {
+          if (rx_index < (GPS_BUFFER_SIZE - 1)) {
+            gps_ping_pong[buffer_escritura_idx][rx_index++] = (char)byte; // Acumula caracteres
+          } else {
+            rx_index = 0; // Descarte íntegro por Buffer Overrun defensivo
+          }
         }
-      }
-      rx_index = 0;
-    } else {
-      if (rx_index < (GPS_BUFFER_SIZE - 1)) {
-        gps_ping_pong[buffer_escritura_idx][rx_index++] =
-            (char)byte; // Acumula caracteres
-      } else {
-        rx_index = 0; // Descarte íntegro por Buffer Overrun defensivo
       }
     }
   }
@@ -551,6 +570,8 @@ static void tarea_principal(void *arg) {
   int64_t ahora_us = 0;
   int64_t ultimo_pub_lento = 0;
   int64_t ultimo_pub_rapido = 0;
+  int64_t ultimo_toggle_led = 0;
+  int estado_led = 0;
 
   while (1) {
     esp_task_wdt_reset(); // Heartbeat para el Task Watchdog Timer (TWDT)
@@ -563,13 +584,17 @@ static void tarea_principal(void *arg) {
       ticks_sin_gps = 0;
       char *trama = gps_ping_pong[idx_trama];
 
-      if (strncmp(trama, "$GPRMC", 6) == 0) {
-        Procesar_Trama_GPRMC(trama);
+      char *start_dollar = strchr(trama, '$');
+      if (start_dollar && strncmp(start_dollar, "$GPRMC", 6) == 0) {
+        Procesar_Trama_GPRMC(start_dollar);
         Procesar_Tiempo_GPS();
 
         if (mi_gps.es_valido) {
           Procesar_Ubicacion_GPS();
         }
+        
+        // ¡Aquí es donde debió estar siempre llamado para poblar la variable global!
+        Calcular_Hora_Local(&tiempo_local);
 
         Calcular_Posicion_Solar(&gps_solar_real);
       }
@@ -596,6 +621,13 @@ static void tarea_principal(void *arg) {
           }
       }
     }
+
+    if (ahora_us - ultimo_toggle_led >= 500000LL) {
+        estado_led = !estado_led;
+        gpio_set_level(PIN_LED_USUARIO, estado_led);
+        ultimo_toggle_led = ahora_us;
+    }
+
     vTaskDelay(pdMS_TO_TICKS(10)); // Ceder CPU
   }
 }
@@ -939,11 +971,12 @@ static void gps_uart_init(void) {
 // Función auxiliar para validar la integridad de la trama NMEA mediante el
 // checksum XOR
 static bool Validar_Checksum_NMEA(const char *buffer) {
-  if (buffer[0] != '$')
+  const char *start_dollar = strchr(buffer, '$');
+  if (!start_dollar)
     return false;
 
   uint8_t checksum_calculado = 0;
-  const char *p = buffer + 1; // Saltar el símbolo '$'
+  const char *p = start_dollar + 1; // Saltar el símbolo '$'
 
   // El checksum en NMEA es el XOR de todos los caracteres entre '$' y '*'
   while (*p && *p != '*') {
@@ -966,18 +999,31 @@ static bool Validar_Checksum_NMEA(const char *buffer) {
 }
 
 static void Procesar_Trama_GPRMC(char *buffer) {
+  char *start_dollar = strchr(buffer, '$');
+  if (!start_dollar)
+    return;
+
   // 1. Filtrado rápido: Solo nos interesan tramas GPRMC
-  if (strncmp(buffer, "$GPRMC", 6) != 0)
+  if (strncmp(start_dollar, "$GPRMC", 6) != 0)
     return;
 
   // 2. Validación de Integridad (Checksum): Protege contra ruidos eléctricos
   // causados por los motores o cables largos que podrían corromper caracteres
-  if (!Validar_Checksum_NMEA(buffer)) {
-    ESP_LOGW("GPS", "Trama descartada por Checksum inválido.");
+  if (!Validar_Checksum_NMEA(start_dollar)) {
+    ESP_LOGW("GPS", "Trama descartada por Checksum inválido. Trama: '%s'", start_dollar);
     return;
   }
 
-  char *start = buffer; // puntero al inicio de la trama
+  // Prevenir que strings truncados o sin terminador nulo corrompan el casteo
+  // a double flotante reiniciando los buffers en cada nueva trama validada
+  memset(mi_gps.hora, 0, sizeof(mi_gps.hora));
+  memset(mi_gps.fecha, 0, sizeof(mi_gps.fecha));
+  memset(mi_gps.latitud, 0, sizeof(mi_gps.latitud));
+  memset(mi_gps.longitud, 0, sizeof(mi_gps.longitud));
+  mi_gps.es_valido = 0; 
+  mi_gps.tiene_hora = 0;
+
+  char *start = start_dollar; // puntero al inicio de la trama
   char *end;            // puntero al final de la trama
   int campo = 0;        // contador de campos
 
@@ -1574,6 +1620,14 @@ static void Procesar_Comando_MQTT(const char *datos, int len) {
     sys_ctrl.usar_fecha_manual = 0;
     sys_ctrl.servo_manual = 0;
     ESP_LOGI(TAG, "MQTT: Reset a modo AUTOMÁTICO");
+
+    // Recálculo INMEDIATO: Forzamos la actualización astronómica en el mismo ciclo de CPU
+    // saltando la cola de la tarea principal.
+    Actualizar_Coordenadas_Calculo();
+    Calcular_Posicion_Solar(&gps_solar);
+    Actualizar_Servos();
+    
+    ESP_LOGI(TAG, "MQTT: Reset a modo GPS. Nuevo destino calculado al instante.");
   }
   // 3. COMANDO: SET_MAN (FORZAR MODO MANUAL)
   else if (strncmp(cmd_ptr, "set_man", 7) == 0) {
@@ -1584,14 +1638,6 @@ static void Procesar_Comando_MQTT(const char *datos, int len) {
     pos_obj_el = pos_actual_el;
     servo_manual_anterior = true;
     ESP_LOGI(TAG, "MQTT: Modo MANUAL activado por usuario");
-  }  
-    // Recálculo INMEDIATO: Forzamos la actualización astronómica en el mismo ciclo de CPU
-    // saltando la cola de la tarea principal.
-    Actualizar_Coordenadas_Calculo();
-    Calcular_Posicion_Solar(&gps_solar);
-    Actualizar_Servos();
-    
-    ESP_LOGI(TAG, "MQTT: Reset a modo GPS. Nuevo destino calculado al instante.");
   }
   // 3. COMANDOS: FIJAR UBICACIÓN VIRTUAL (TESTING EN INTERIORES)
   else if (strncmp(cmd_ptr, "set_lat", 7) == 0) {
@@ -2309,7 +2355,7 @@ static void Datalogger_Escribir_Punto(void) {
     }
 }
 
-static int Datalogger_Contar_Pendientes(void) {
+static int __attribute__((unused)) Datalogger_Contar_Pendientes(void) {
     int total_pendientes = 0;
     DIR* dr = opendir("/spiffs");
     if (!dr) return 0;
@@ -2317,7 +2363,7 @@ static int Datalogger_Contar_Pendientes(void) {
     struct dirent* de;
     while ((de = readdir(dr)) != NULL) {
         if (strstr(de->d_name, ".csv")) {
-            char path[64];
+            char path[300];
             snprintf(path, sizeof(path), "/spiffs/%s", de->d_name);
             FILE* f = fopen(path, "r");
             if (f) {
@@ -2364,7 +2410,7 @@ static void Datalogger_Tarea_Descarga(void *arg) {
     while ((de = readdir(dr)) != NULL && g_descarga_en_curso) {
         if (!strstr(de->d_name, ".csv")) continue;
         
-        char path[64];
+        char path[300];
         if (strstr(de->d_name, "data/")) snprintf(path, sizeof(path), "/spiffs/%s", de->d_name);
         else snprintf(path, sizeof(path), "/spiffs/data/%s", de->d_name);
         
