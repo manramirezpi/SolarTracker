@@ -1,0 +1,358 @@
+package com.solartracker.datos;
+
+import org.json.JSONObject;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
+import android.content.Context;
+
+/**
+ * Especialista en decodificar secuencias String del protocolo MQTT
+ * y alimentar/actualizar la RAM estática del sistema.
+ * 
+ * Implementa un mecanismo (Bypass GC) para los datos de alta frecuencia que
+ * recicla memoria nativa evitando la creación excesiva de objetos JSON.
+ */
+public class ProcesadorTelemetria {
+
+    private boolean primeraVez = true;
+    private int contadorMuestreoPotencia = 0;
+
+    public void resetSync() {
+        primeraVez = true;
+    }
+
+    public boolean procesarDato(String data, Context context) {
+        try {
+            if (data.startsWith("TOPIC:" + AlmacenDatosRAM.topicEspStatus)) {
+                String payload = data.substring(data.indexOf("|") + 1);
+                if (payload.equals("offline")) {
+                    AlmacenDatosRAM.conectado_PubSub = "ESP32 DESCONECTADO (LWT)";
+                    AlmacenDatosRAM.conectado = false;
+                } else if (payload.equals("online")) {
+                    AlmacenDatosRAM.conectado_PubSub = "ESP32 EN LÍNEA";
+                    AlmacenDatosRAM.conectado = true;
+                }
+                return true; 
+            }
+
+            // DETECCIÓN DE DATOS HISTÓRICOS (Datalogger V2)
+            if (data.startsWith("TOPIC:" + AlmacenDatosRAM.topicSubRecord)) {
+                String payload = data.substring(data.indexOf("|") + 1);
+                return procesarRegistroDatalogger(payload, context);
+            }
+            
+            if (data.startsWith("TOPIC:" + AlmacenDatosRAM.topicSubDone)) {
+                AlmacenDatosRAM.conectado_PubSub = "DOWNLOAD_DONE";
+                return true;
+            }
+
+            // ESTRATEGIA DE OPTIMIZACIÓN (Garbage Collector Bypass)
+            if (data.contains("\"sol\":")) {
+                int idxSol = data.indexOf("\"sol\":");
+                int idxServos = data.indexOf("\"servos\":");
+                int idxP = data.indexOf("\"p\":");
+
+                AlmacenDatosRAM.sol_az = extraerFloat(data, "\"az\":", idxSol);
+                AlmacenDatosRAM.sol_el = extraerFloat(data, "\"el\":", idxSol);
+
+                AlmacenDatosRAM.servo_az = extraerFloat(data, "\"az\":", idxServos);
+                AlmacenDatosRAM.servo_el = extraerFloat(data, "\"el\":", idxServos);
+
+                AlmacenDatosRAM.p1_inst = extraerFloat(data, "\"c1\":", idxP);
+                AlmacenDatosRAM.p1_avg_dia = extraerFloat(data, "\"a1\":", idxP);
+                AlmacenDatosRAM.p2_inst = extraerFloat(data, "\"c2\":", idxP);
+                AlmacenDatosRAM.p2_avg_dia = extraerFloat(data, "\"a2\":", idxP);
+
+                // Actualización de media móvil local para suavizado de gauges
+                contadorMuestreoPotencia++;
+                if (contadorMuestreoPotencia % 5 == 0) {
+                    actualizarBufferCircular(AlmacenDatosRAM.p1_inst, true);
+                    AlmacenDatosRAM.p1_avg = obtenerMediaCircular(true);
+                    actualizarBufferCircular(AlmacenDatosRAM.p2_inst, false);
+                    AlmacenDatosRAM.p2_avg = obtenerMediaCircular(false);
+                }
+                return false; // Fast tramas no traen datos de GPS inicial
+            }
+
+            // --- PROCESAMIENTO CANAL LENTO (1Hz) ---
+            JSONObject obj = new JSONObject(data);
+            
+            // Guardar cabecera para metadatos CSV si tiene gps y fecha
+            if (obj.has("gps") && obj.has("fecha")) {
+                JSONObject gps = obj.getJSONObject("gps");
+                AlmacenDatosRAM.lastSlowPayloadHeader = String.format(Locale.getDefault(),
+                    "# lat=%.4f,lon=%.4f,fecha=%s",
+                    gps.optDouble("lat", 0), gps.optDouble("lon", 0), 
+                    obj.optString("fecha", "0000-00-00"));
+            }
+
+            if (obj.has("gps")) {
+                JSONObject gps = obj.getJSONObject("gps");
+                AlmacenDatosRAM.lat = (float) gps.optDouble("lat", AlmacenDatosRAM.lat);
+                AlmacenDatosRAM.lon = (float) gps.optDouble("lon", AlmacenDatosRAM.lon);
+                Object validoObj = gps.opt("val");
+                if (validoObj instanceof Boolean) {
+                    AlmacenDatosRAM.gps_valido = (Boolean) validoObj;
+                } else {
+                    AlmacenDatosRAM.gps_valido = String.valueOf(validoObj).equalsIgnoreCase("true");
+                }
+            }
+
+            AlmacenDatosRAM.fecha = obj.optString("fecha", AlmacenDatosRAM.fecha);
+            AlmacenDatosRAM.hora = obj.optString("hora", AlmacenDatosRAM.hora);
+
+            if (obj.has("health")) {
+                String healthStr = obj.getString("health");
+                String[] items = healthStr.split(",");
+                long ahora = System.currentTimeMillis();
+                int prevGlobal = AlmacenDatosRAM.health_global;
+                
+                // Actualizar objeto HealthStatus
+                AlmacenDatosRAM.currentHealth.timestampMs = ahora;
+                
+                for (String item : items) {
+                    String[] parts = item.split(":");
+                    if (parts.length == 2) {
+                        String key = parts[0];
+                        int val = Integer.parseInt(parts[1]);
+                        actualizarSubsistema(key, val, ahora);
+                    }
+                }
+                
+                if (obj.has("global")) {
+                    int currentGlobal = obj.getInt("global");
+                    // Notificar si hay degradación (0 -> 1 o 2)
+                    if (prevGlobal == 0 && currentGlobal > 0) {
+                        String comp = "SISTEMA";
+                        if (AlmacenDatosRAM.currentHealth.ina > 0) comp = "INA3221";
+                        else if (AlmacenDatosRAM.currentHealth.gps > 0) comp = "GPS";
+                        else if (AlmacenDatosRAM.currentHealth.wifi > 0) comp = "WIFI";
+                        else if (AlmacenDatosRAM.currentHealth.mqtt > 0) comp = "MQTT";
+                        else if (AlmacenDatosRAM.currentHealth.spiffs > 1) comp = "SPIFFS"; // FAIL
+                        else if (AlmacenDatosRAM.currentHealth.servos > 0) comp = "SERVOS";
+                        AlmacenDatosRAM.conectado_PubSub = "DEG:" + comp;
+                    }
+                    AlmacenDatosRAM.health_global = currentGlobal;
+                    AlmacenDatosRAM.currentHealth.global = currentGlobal;
+                }
+            }
+
+            if (obj.has("modo")) {
+                String modoPrincipal = obj.getString("modo"); 
+                String parking = obj.optString("parking", "false");
+                if (parking.equalsIgnoreCase("true")) {
+                    AlmacenDatosRAM.modo = "PARKING";
+                } else {
+                    AlmacenDatosRAM.modo = modoPrincipal;
+                }
+            }
+
+            if (primeraVez && AlmacenDatosRAM.lat != 0) {
+                primeraVez = false;
+                return true;
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return false;
+    }
+
+    private void actualizarSubsistema(String key, int val, long ts) {
+        if (key.equals("INA")) { AlmacenDatosRAM.health_ina = val; AlmacenDatosRAM.ts_ina = ts; AlmacenDatosRAM.currentHealth.ina = val; }
+        else if (key.equals("GPS")) { AlmacenDatosRAM.health_gps = val; AlmacenDatosRAM.ts_gps = ts; AlmacenDatosRAM.currentHealth.gps = val; }
+        else if (key.equals("WIFI")) { AlmacenDatosRAM.health_wifi = val; AlmacenDatosRAM.ts_wifi = ts; AlmacenDatosRAM.currentHealth.wifi = val; }
+        else if (key.equals("MQTT")) { AlmacenDatosRAM.health_mqtt = val; AlmacenDatosRAM.ts_mqtt = ts; AlmacenDatosRAM.currentHealth.mqtt = val; }
+        else if (key.equals("SPIFFS")) { AlmacenDatosRAM.health_disk = val; AlmacenDatosRAM.ts_disk = ts; AlmacenDatosRAM.currentHealth.spiffs = val; }
+        else if (key.equals("SERVOS")) { AlmacenDatosRAM.health_servos = val; AlmacenDatosRAM.ts_servos = ts; AlmacenDatosRAM.currentHealth.servos = val; }
+    }
+
+    private boolean procesarRegistroDatalogger(String payload, Context context) {
+        try {
+            String[] parts = payload.split(",");
+            if (parts.length != 3) {
+                publicarNack(payload);
+                return false;
+            }
+
+            String hora = parts[0];
+            float p1 = Float.parseFloat(parts[1]);
+            float p2 = Float.parseFloat(parts[2]);
+
+            boolean horaValida = hora.matches("([01]?[0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]");
+            boolean p1Valida = (p1 >= 0 && p1 <= 700);
+            boolean p2Valida = (p2 >= 0 && p2 <= 700);
+
+            if (horaValida && p1Valida && p2Valida) {
+                AlmacenDatosRAM.DataRecord record = new AlmacenDatosRAM.DataRecord(hora, p1, p2);
+                
+                // Verificar duplicados
+                if (!AlmacenDatosRAM.recordsList.contains(record)) {
+                    AlmacenDatosRAM.recordsList.add(record);
+                }
+                
+                AlmacenDatosRAM.pendingAckId = hora; 
+                return true;
+            } else {
+                publicarNack(hora);
+                return false;
+            }
+        } catch (Exception e) {
+            publicarNack("error");
+            return false;
+        }
+    }
+
+    private void publicarNack(String timestamp) {
+        // El hilo de Actividad escuchará este pendingAckId especial
+        AlmacenDatosRAM.pendingAckId = "NACK:" + timestamp;
+    }
+
+    private float extraerFloat(String json, String key, int searchFromIndex) {
+        int startIdx = json.indexOf(key, searchFromIndex);
+        if (startIdx == -1)
+            return 0f;
+        startIdx += key.length();
+        int endIdxComma = json.indexOf(',', startIdx);
+        int endIdxBrace = json.indexOf('}', startIdx);
+
+        int endIdx;
+        if (endIdxComma == -1)
+            endIdx = endIdxBrace;
+        else if (endIdxBrace == -1)
+            endIdx = endIdxComma;
+        else
+            endIdx = Math.min(endIdxComma, endIdxBrace);
+
+        if (endIdx == -1)
+            return 0f;
+        try {
+            return Float.parseFloat(json.substring(startIdx, endIdx));
+        } catch (Exception e) {
+            return 0f;
+        }
+    }
+
+    private void actualizarBufferCircular(float nuevoValor, boolean esCanal1) {
+        float[] buffer = esCanal1 ? AlmacenDatosRAM.historico_p1 : AlmacenDatosRAM.historico_p2;
+        int index = esCanal1 ? AlmacenDatosRAM.indexP1 : AlmacenDatosRAM.indexP2;
+        int count = esCanal1 ? AlmacenDatosRAM.countP1 : AlmacenDatosRAM.countP2;
+
+        if (count == AlmacenDatosRAM.MAX_HISTORICO) {
+            float viejoValor = buffer[index];
+            if (esCanal1)
+                AlmacenDatosRAM.sumaP1 -= viejoValor;
+            else
+                AlmacenDatosRAM.sumaP2 -= viejoValor;
+        }
+
+        buffer[index] = nuevoValor;
+        if (esCanal1)
+            AlmacenDatosRAM.sumaP1 += nuevoValor;
+        else
+            AlmacenDatosRAM.sumaP2 += nuevoValor;
+
+        index = (index + 1) % AlmacenDatosRAM.MAX_HISTORICO;
+        if (count < AlmacenDatosRAM.MAX_HISTORICO)
+            count++;
+
+        if (esCanal1) {
+            AlmacenDatosRAM.indexP1 = index;
+            AlmacenDatosRAM.countP1 = count;
+        } else {
+            AlmacenDatosRAM.indexP2 = index;
+            AlmacenDatosRAM.countP2 = count;
+        }
+    }
+
+    private float obtenerMediaCircular(boolean esCanal1) {
+        int count = esCanal1 ? AlmacenDatosRAM.countP1 : AlmacenDatosRAM.countP2;
+        if (count == 0)
+            return 0;
+        float suma = esCanal1 ? AlmacenDatosRAM.sumaP1 : AlmacenDatosRAM.sumaP2;
+        return suma / count;
+    }
+
+    private void guardarBatchTxt(String jsonStr, Context context) {
+        try {
+            JSONObject obj = new JSONObject(jsonStr);
+            int sessionId = obj.optInt("sid", 0);
+            int batchId = obj.optInt("id", 0);
+            int part = obj.optInt("part", 0);
+            boolean isLast = obj.optBoolean("last", false);
+            boolean isTemp = obj.optBoolean("temp", false);
+            String content = obj.optString("data", "");
+
+            // ESTRATEGIA DE ACUMULACIÓN MASIVA:
+            // Usamos un único archivo de trabajo para que sesiones cortas o perdidas
+            // alimenten el mismo set.
+            File folder = context.getExternalFilesDir(null);
+            File file = new File(folder, "FLUJO_POTENCIA_PENDIENTE.txt");
+
+            FileOutputStream out = new FileOutputStream(file, true); // SIEMPRE APPEN (true)
+
+            // Si es el inicio de una ráfaga o una nueva sesión, ponemos una marca de
+            // trazabilidad
+            if (part == 0) {
+                String stamp = "\n# --- NUEVA SESIÓN/LOTE (SID:" + sessionId + " | ID:" + batchId + ") ---\n";
+                stamp += "# Fecha: " + new Date().toString() + "\n";
+                out.write(stamp.getBytes());
+            }
+
+            out.write(content.getBytes());
+            out.close();
+
+            if (isLast) {
+                // Al completar la meta masiva (500), generamos el archivo final.
+                String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
+                String prefix = isTemp ? "SNAPSHOT_MASIVO_" : "DATA_MASIVA_";
+                String finalName = prefix + timestamp + ".txt";
+
+                File finalFile = new File(folder, finalName);
+                if (file.renameTo(finalFile)) {
+                    AlmacenDatosRAM.conectado_PubSub = "¡COLECCIÓN " + finalName + " GUARDADA!";
+                }
+            } else {
+                AlmacenDatosRAM.conectado_PubSub = "Alimentando colección masiva (L:" + batchId + " P:" + part + ")...";
+            }
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            AlmacenDatosRAM.conectado_PubSub = "Error al procesar telemetría de lote";
+        }
+    }
+
+    private void guardarHistoricoCsv(String jsonStr, Context context) {
+        try {
+            JSONObject obj = new JSONObject(jsonStr);
+            String id = obj.getString("id"); // "HH:MM:SS"
+            String p1 = obj.getString("p1");
+            String p2 = obj.getString("p2");
+            String modo = obj.getString("m");
+
+            // Nombre del archivo basado en la fecha del sistema Android
+            String fechaHoy = new SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(new Date());
+            File folder = context.getExternalFilesDir(null);
+            File file = new File(folder, "HISTORICO_" + fechaHoy + ".csv");
+
+            boolean nuevo = !file.exists();
+            FileOutputStream out = new FileOutputStream(file, true);
+            if (nuevo) {
+                // Cabecera simple para el CSV diario
+                out.write("hora_utc,p1_mw,p2_mw,modo\n".getBytes());
+            }
+            String linea = id + "," + p1 + "," + p2 + "," + modo + "\n";
+            out.write(linea.getBytes());
+            out.close();
+
+            // Activamos el ACK para que la Actividad lo envíe
+            AlmacenDatosRAM.pendingAckId = id;
+            AlmacenDatosRAM.conectado_PubSub = "Datalogger: registro " + id + " recibido";
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+}
