@@ -73,8 +73,7 @@ static const char *TAG = "SOLAR";
 #define SERVO_MIN_PWM 500                  // Pulso para 0° (us)
 #define SERVO_MAX_PWM 2500                 // Pulso para 180° (us)
 #define SERVO_RANGO_DEG 180.0f             // Rango físico del servo en grados
-#define FACTOR_CONVERSION                                                      \
-  ((float)(SERVO_MAX_PWM - SERVO_MIN_PWM) / SERVO_RANGO_DEG)
+#define FACTOR_CONVERSION ((float)(SERVO_MAX_PWM - SERVO_MIN_PWM) / SERVO_RANGO_DEG)
 
 // ─── GPS UART ────────────────────────────────────────────────────────────────
 #define GPS_UART_NUM UART_NUM_2
@@ -91,11 +90,9 @@ static const char *TAG = "SOLAR";
 #define WIFI_FAIL_BIT BIT1      // Flag: Fallo tras agotar reintentos
 #define WIFI_MAX_RETRIES 5      // Máximo de intentos de conexión
 
-static EventGroupHandle_t
-    wifi_event_group;            // Grupo de eventos para sincronización de red
+static EventGroupHandle_t wifi_event_group; // Grupo de eventos para sincronización de red
 static int wifi_retry_count = 0; // Contador de reintentos actuales
-static esp_mqtt_client_handle_t mqtt_client =
-    NULL;                           // Manejador del cliente MQTT
+static esp_mqtt_client_handle_t mqtt_client = NULL; // Manejador del cliente MQTT
 static bool mqtt_conectado = false; // Estado lógico de la conexión al broker
 
 // ─── Estructuras de datos ────────────────────────────────────────────────────
@@ -156,10 +153,9 @@ typedef struct {
   // --- Banderas de Selección (Flags de Estado) ---
   uint8_t usar_lat_manual; // 1: Ignora GPS, usa lat_manual
   uint8_t usar_lon_manual; // 1: Ignora GPS, usa lon_manual
-  uint8_t
-      simulacion_activa; // 1: Desacopla el tiempo real; usa factor_velocidad
+  uint8_t simulacion_activa; // 1: Desacopla el tiempo real; usa factor_velocidad
   uint8_t usar_fecha_manual; // 1: Fija el cálculo en una fecha estática
-                             // específica (dia_manual, mes_manual, anio_manual)
+  // específica (dia_manual, mes_manual, anio_manual)
   uint8_t servo_manual; // 1: Control directo de motores (modo independiente)
 
   // --- Valores de Configuración y Datos de Simulación ---
@@ -201,8 +197,7 @@ static int pwm_el_actual = 1500;
 
 const uint8_t dias_por_mes[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
 
-static QueueHandle_t
-    cola_gps; // Manejador de la cola IPC para índices de buffer
+static QueueHandle_t cola_gps; // Manejador de la cola IPC para índices de buffer
 
 // ─── Doble Buffer Estático (Ping-Pong) para UART GPS ─────────────────────────
 #define GPS_BUFFER_SIZE 120
@@ -224,8 +219,7 @@ static int64_t uptime_segundos = 0;
 static bool en_modo_busqueda = true; // Modo búsqueda cuando no hay coordenadas
 static float angulo_az_busqueda = 0.0f; // Ángulo azimutal para búsqueda
 static int64_t ultimo_cambio_az = 0;    // Timestamp del último cambio de azimut
-static bool servo_manual_anterior =
-    false; // Para detectar cambio de modo manual a automático
+static bool servo_manual_anterior = false; // Para detectar cambio de modo manual a automático
 
 // ─── Modo parking ────────────────────────────────────────────────────────────
 static bool en_modo_parking = false; // Indica si está en modo parking (noche)
@@ -239,8 +233,7 @@ static esp_timer_handle_t timer_movimiento; // Timer para movimiento gradual
 
 // ─── Variables INA3221 ───────────────────────────────────────────────────────
 static uint8_t INA3221_ADDR = 0x40; // Dirección I2C del INA3221
-static bool ina_ch1_valido =
-    false; // Indica si la lectura del canal 1 es válida
+static bool ina_ch1_valido = false; // Indica si la lectura del canal 1 es válida
 static float ina_ch1_v = 0.0f;
 static float ina_ch1_i = 0.0f;
 static float ina_ch1_p = 0.0f;
@@ -263,7 +256,7 @@ static float last_batch_p1 = -100.0f;
 //   ventanas discretas de 5 minutos, atenuando picos instantáneos.
 // - Etapa 2 (Largo Plazo): Alimenta un buffer circular (Media Móvil) de 288
 //   muestras (24h) para obtener la tendencia de producción diaria constante.
-// Incluye heurísticas de validación para descartar mediciones estáticas
+// Incluye hmedidas de validación para descartar mediciones estáticas
 // en caso de fallos en el bus I2C o bloqueos del ADC.
 
 #define INA_VENTANA_MOVIL 288   // muestras en la media móvil diaria

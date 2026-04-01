@@ -6,7 +6,7 @@ Aplicación móvil para monitoreo en tiempo real y control remoto del sistema So
 
 ## Capturas de pantalla
 
-*(Las capturas de pantalla se agregarán junto con los datos de campo en v2.1)*
+Ver capturas detalladas de la interfaz en [v2/README.md — Capturas de la aplicación Android](../../README.md#capturas-de-la-aplicación-android)
 
 ---
 
@@ -114,7 +114,7 @@ SeguidorApp/
 cd v2/codigo/SeguidorApp
 
 # 1. Configurar credenciales del broker MQTT (solo la primera vez)
-cp app/src/main/java/com/solartracker/Configuracion.example.java \
+cp app/src/main/java/com/solartracker/Configuracion.java.example \
    app/src/main/java/com/solartracker/Configuracion.java
 # Editar Configuracion.java con la IP/dominio del broker y las credenciales
 

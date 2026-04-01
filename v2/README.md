@@ -12,9 +12,48 @@ Esta versión extiende la v1.0 con conectividad inalámbrica, telemetría sincro
 
 ---
 
-## Capturas
+## Capturas de la aplicación Android
 
-*(Las capturas de pantalla se agregarán junto con los datos de campo en v2.1)*
+La aplicación **SeguidorApp** ofrece visualización en tiempo real de la telemetría del sistema y control remoto completo del seguidor solar.
+
+### Interfaz principal - Modo GPS
+<p align="center">
+  <img src="./imagenes/app/01_interfaz_principal_gps.jpeg" width="30%" title="Interfaz principal con seguimiento GPS activo">
+</p>
+
+Pantalla principal mostrando el seguimiento solar automático en modo GPS. La interfaz presenta:
+- **Medidores analógicos (gauges)** para visualización de ángulos solares reales vs. posición de servos
+- **Datos de telemetría en tiempo real** de ambos paneles (móvil y estático)
+- **Cálculo de ganancia energética acumulada** — basada en la energía total desde el inicio del día o desde que se lanzó la aplicación (no es instantánea)
+- **Controles de ubicación y tiempo** con sliders para ajuste manual
+- **Estado de conexión** — GPS con señal estable y monitoreo activo
+
+### Comparativa de escenarios de operación
+
+<p align="center">
+  <img src="./imagenes/app/02_tracking_atardecer_alta_ganancia.jpeg" width="30%" title="Tracking iniciado en atardecer">
+  <img src="./imagenes/app/05_tracking_diurno.jpeg" width="30%" title="Tracking durante el día">
+  <img src="./imagenes/app/06_monitoreo_nocturno.jpeg" width="30%" title="Monitoreo nocturno 24/7">
+</p>
+
+**Izquierda:** Aplicación iniciada al atardecer (17:28) — la ganancia mostrada (+284.8%) refleja solo la energía acumulada desde que se lanzó la app en un momento de ángulo solar rasante, donde el panel móvil captura proporcionalmente más radiación que el estático. **Esta no es la ganancia diaria total del sistema.**
+
+**Centro:** Sesión de monitoreo durante el día (13:52) — ganancia acumulada desde el inicio de la sesión de +11.7%. El valor refleja las condiciones desde que se activó el monitoreo.
+
+**Derecha:** Madrugada (01:13) — monitoreo continuo 24/7 con valores mínimos de radiación nocturna.
+
+> **Nota importante:** Los valores de ganancia mostrados dependen del momento de inicio de la aplicación y las condiciones particulares de radiación durante la sesión de monitoreo. No representan la ganancia total diaria del sistema, sino la comparativa desde el momento de inicialización hasta el momento actual.
+
+### Modos de operación
+
+<p align="center">
+  <img src="./imagenes/app/03_modo_manual.jpeg" width="30%" title="Modo de control manual">
+  <img src="./imagenes/app/04_error_conexion_broker.jpeg" width="30%" title="Manejo de errores de conexión">
+</p>
+
+**Izquierda:** **Modo MANUAL** activado — control directo de azimut y elevación mediante sliders, suspendiendo temporalmente el seguimiento GPS automático.
+
+**Derecha:** **Manejo robusto de errores** — la aplicación detecta pérdida de conexión con el broker MQTT y ofrece reconexión mediante el botón "CONECTAR".
 
 ---
 
@@ -45,14 +84,14 @@ graph LR
 
 ## Diagrama de conexiones
 
-![Esquemático del circuito](./hardware/esquematico.png)
-> **Nota:** El archivo original editable de Fritzing (`v2.0.fzz`) y las fotografías del hardware se encuentran en el directorio [`/hardware`](./hardware).
+![Esquemático del circuito](./imagenes/hardware/esquematico.png)
+> **Nota:** El archivo original editable de Fritzing (`v2.0.fzz`) y las fotografías del hardware se encuentran en el directorio [`/imagenes/hardware`](./imagenes/hardware).
 
 ### Montaje físico (Prototipo)
 
 <p align="center">
-  <img src="./hardware/montaje_completo_1.jpeg" width="45%" title="Montaje completo con procesador y alimentación">
-  <img src="./hardware/detalle_cableado.jpeg" width="45%" title="Detalle del cableado y etapa de optoacoplamiento">
+  <img src="./imagenes/hardware/montaje_completo_1.jpeg" width="45%" title="Montaje completo con procesador y alimentación">
+  <img src="./imagenes/hardware/detalle_cableado.jpeg" width="45%" title="Detalle del cableado y etapa de optoacoplamiento">
 </p>
 
 *Desarrollo sobre protoboard: Izquierda: Integración de la etapa de alimentación (Buck LM2596), MCU (ESP32) y sensor de potencia (INA3221). Derecha: Cableado base mostrando la fase de optoacoplamiento (PC817) para el control PWM de los servomotores.*
