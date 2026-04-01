@@ -1,0 +1,427 @@
+package com.solartracker;
+
+import android.app.Activity;
+import android.graphics.Color;
+import android.os.Bundle;
+import android.os.Handler;
+import android.view.ViewGroup;
+import android.widget.SeekBar;
+
+import com.solartracker.comunicaciones.ClientePubSubMQTT;
+import com.solartracker.datos.AlmacenDatosRAM;
+import com.solartracker.datos.ProcesadorTelemetria;
+import com.solartracker.utilidades.DialogoSalir;
+import com.solartracker.utilidades.GeneradorUI;
+
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import android.util.Log;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
+import android.net.Uri;
+import androidx.core.content.FileProvider;
+import android.content.Intent;
+
+/**
+ * Controlador principal de la aplicación SeguidorApp (Capa "Controlador" en el patrón MVC/MVP).
+ * 
+ * Tras el refactoring arquitectónico de v2.0, esta clase ya no maneja la instanciación 
+ * visual ni el procesamiento pesado de tramas de telemetría.
+ * 
+ * Sus tres responsabilidades únicas (Single-Responsibility) son:
+ * 1. Gestionar el ciclo de vida de la Actividad en Android (onCreate, onDestroy, onRestart).
+ * 2. Manejar los eventos del usuario (OnTouch, OnClick) generados por la capa Vista (GeneradorUI).
+ * 3. Ejecutar y administrar el Hilo en segundo plano (run) que extrae los datos de la red 
+ *    (ClientePubSubMQTT), los envía a procesamiento (ProcesadorTelemetria) y notifica a la Vista.
+ */
+public class ActividadSeguidor extends Activity implements Runnable {
+
+    private GeneradorUI ui;
+
+    private ClientePubSubMQTT cliente;
+    private ProcesadorTelemetria procesadorTelemetria = new ProcesadorTelemetria();
+    private Thread hilo;
+    private final Handler myHandler = new Handler();
+
+    private boolean intervencionGPS = false;   // Prioridad manual sobre coordenadas
+    private boolean intervencionServo = false; // Prioridad manual sobre ángulos servo
+    private long lastManualInteractionTime = 0; 
+    private long ultimoTiempoPublishGPS = 0;   // Throttling MQTT GPS
+    private long ultimoTiempoPublishServo = 0; // Throttling MQTT Servos
+    private static final long MANUAL_LOCKOUT_MS = 3000; 
+    private volatile boolean threadRunning = true; // Control del hilo
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+
+        ui = new GeneradorUI(this);
+        ui.gestionarResolucion();
+
+        ViewGroup.LayoutParams params = new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+        this.setContentView(ui.construir(), params);
+
+        eventos();
+        cliente = new ClientePubSubMQTT(this);
+        hilo = new Thread(this);
+        hilo.start();
+    }
+
+    /**
+     * Registra todos los listeners de la UI. Separa la lógica de eventos de la construcción
+     * de vistas (que ocurre en GeneradorUI) y del ciclo de vida (onCreate/onDestroy).
+     * Cada listener aplica un throttle de 150ms antes de publicar por MQTT para evitar
+     * saturar el broker durante arrastres continuos del usuario.
+     */
+    private void eventos() {
+        ui.botonConectar.setOnClickListener(v -> {
+            if (!AlmacenDatosRAM.conectado) {
+                AlmacenDatosRAM.resetStats(); // Limpiar promedios previos para empezar fresco
+                cliente.conectar();
+            } else {
+                cliente.desconectar();
+                AlmacenDatosRAM.conectado = false;
+                AlmacenDatosRAM.conectado_PubSub = "Desconectado";
+                procesadorTelemetria.resetSync(); // Reset sync flag for next connection
+            }
+        });
+
+        ui.botonResetGPS.setOnClickListener(v -> {
+            sincronizarControles();
+            publicarComando("reset", 0, false);
+        });
+
+        ui.sliderLat.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                float lat = (progress - 9000) / 100f;
+                ui.labelLat.setText(String.format("Lat: %.2f", lat));
+                if (fromUser) {
+                    intervencionGPS = true;   // Usuario toma prioridad en GPS
+                    intervencionServo = false; // Al mover coords, liberamos los servos para que sigan al nuevo punto
+                    lastManualInteractionTime = System.currentTimeMillis(); 
+                    if (System.currentTimeMillis() - ultimoTiempoPublishGPS > 150) {
+                        publicarComando("set_lat", lat, true);
+                        ultimoTiempoPublishGPS = System.currentTimeMillis();
+                    }
+                }
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {
+                float lat = (seekBar.getProgress() - 9000) / 100f;
+                publicarComando("set_lat", lat, true);
+            }
+        });
+
+        ui.sliderLon.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                float lon = (progress - 18000) / 100f;
+                ui.labelLon.setText(String.format("Lon: %.2f", lon));
+                if (fromUser) {
+                    intervencionGPS = true;   
+                    intervencionServo = false; 
+                    lastManualInteractionTime = System.currentTimeMillis(); 
+                    if (System.currentTimeMillis() - ultimoTiempoPublishGPS > 150) {
+                        publicarComando("set_lon", lon, true);
+                        ultimoTiempoPublishGPS = System.currentTimeMillis();
+                    }
+                }
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {
+                float lon = (seekBar.getProgress() - 18000) / 100f;
+                publicarComando("set_lon", lon, true);
+            }
+        });
+
+        ui.sliderTiempo.setOnValueChangeListener(value -> {
+            AlmacenDatosRAM.factor_vel = value;
+            // El tiempo suele ir ligado al GPS, pero lo tratamos como intervención GPS
+            intervencionGPS = true; 
+            publicarComando("set_vel", value, true);
+        });
+
+        // Eventos Manuales
+        ui.sliderManualAz.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                int valorReal = progress - 90; // Mapeo visual a valor astronómico
+                ui.labelManualAz.setText("Manual Az: " + valorReal + "°");
+                if (fromUser) {
+                    intervencionServo = true;
+                    lastManualInteractionTime = System.currentTimeMillis();
+                    if (System.currentTimeMillis() - ultimoTiempoPublishServo > 150) {
+                        publicarComando("set_ser_az", valorReal, true);
+                        ultimoTiempoPublishServo = System.currentTimeMillis();
+                    }
+                }
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {
+                int valorReal = seekBar.getProgress() - 90;
+                publicarComando("set_ser_az", valorReal, true);
+            }
+        });
+
+        ui.sliderManualEl.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                ui.labelManualEl.setText("Manual El: " + progress + "°");
+                if (fromUser) {
+                    intervencionServo = true; // El usuario toma prioridad absoluta
+                    lastManualInteractionTime = System.currentTimeMillis(); 
+                    if (System.currentTimeMillis() - ultimoTiempoPublishServo > 150) {
+                        publicarComando("set_ser_el", progress, true);
+                        ultimoTiempoPublishServo = System.currentTimeMillis();
+                    }
+                }
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {
+                if (AlmacenDatosRAM.conectado) {
+                    publicarComando("set_ser_el", seekBar.getProgress(), true);
+                }
+            }
+        });
+
+        ui.botonBatch.setOnClickListener(v -> {
+            if (AlmacenDatosRAM.conectado) {
+                AlmacenDatosRAM.registrosDatalogger.clear();
+                ui.botonCompartir.setEnabled(false);
+                publicarComando("get_temp", 0, false);
+                AlmacenDatosRAM.conectado_PubSub = "Solicitando lote...";
+                actualizarUI();
+            }
+        });
+
+        ui.botonCompartir.setOnClickListener(v -> generarYCompartirCSV());
+    }
+
+    private void generarYCompartirCSV() {
+        if (AlmacenDatosRAM.registrosDatalogger.isEmpty()) return;
+
+        try {
+            String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
+            File cacheDir = getExternalCacheDir();
+            File file = new File(cacheDir, "SolarTracker_Batch_" + timestamp + ".csv");
+            
+            try (FileOutputStream out = new FileOutputStream(file)) {
+                out.write("P1_mW,P2_mW\n".getBytes());
+                for (String registro : AlmacenDatosRAM.registrosDatalogger) {
+                    out.write((registro + "\n").getBytes());
+                }
+            }
+
+            Uri uri = FileProvider.getUriForFile(this, "com.solartracker.fileprovider", file);
+            Intent intent = new Intent(Intent.ACTION_SEND);
+            intent.setType("text/csv");
+            intent.putExtra(Intent.EXTRA_SUBJECT, "SolarTracker Data Batch");
+            intent.putExtra(Intent.EXTRA_STREAM, uri);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(intent, "Compartir CSV..."));
+
+        } catch (Exception e) {
+            Log.e("ActividadSeguidor", "Error al generar CSV", e);
+        }
+    }
+
+    /**
+     * Restaura los controles deslizantes a la posición real reportada por el hardware.
+     * Se llama tras un reset GPS o cuando llega el primer dato de telemetría válido,
+     * evitando que los sliders queden desincronizados con el estado real del seguidor.
+     */
+    private void sincronizarControles() {
+        AlmacenDatosRAM.resetStats(); 
+        intervencionGPS = false;
+        intervencionServo = false; 
+        lastManualInteractionTime = 0; // Permitir el seguimiento inmediato tras el reset
+        // Sincronizar GPS
+        int progLat = (int) (AlmacenDatosRAM.lat * 100 + 9000);
+        int progLon = (int) (AlmacenDatosRAM.lon * 100 + 18000);
+        ui.sliderLat.setProgress(progLat);
+        ui.sliderLon.setProgress(progLon);
+        
+        // Sincronizar Manuales con posición real
+        ui.sliderManualAz.setProgress((int) AlmacenDatosRAM.servo_az + 90);
+        ui.sliderManualEl.setProgress((int) AlmacenDatosRAM.servo_el);
+        
+        // Resetear velocidad
+        ui.sliderTiempo.setValue(1.0f);
+    }
+
+    /**
+     * Serializa y publica un comando JSON al broker MQTT.
+     * @param cmd       Nombre del comando (ej. "set_lat", "reset", "set_vel").
+     * @param valor     Valor numérico asociado. Ignorado si {@code conValor} es false.
+     * @param conValor  true si el comando lleva payload de valor; false para comandos sin argumento.
+     */
+    private void publicarComando(String cmd, float valor, boolean conValor) {
+        try {
+            JSONObject obj = new JSONObject();
+            obj.put("cmd", cmd);
+            if (conValor) {
+                if (cmd.equals("set_vel")) {
+                    obj.put("factor", (int) valor);
+                } else {
+                    obj.put("valor", valor);
+                }
+            }
+            cliente.publicar(obj.toString());
+        } catch (JSONException e) {
+            e.printStackTrace();
+        }
+    }
+
+
+    /**
+     * Hilo en segundo plano de alta reactividad.
+     * Lee continuamente del buffer MQTT, decodifica a través de ProcesadorTelemetria 
+     * y ordena refrescar la Vista solo cuando hay datos nuevos.
+     */
+    @Override
+    public void run() {
+        while (threadRunning) {
+            try {
+                // Aumentamos frecuencia a 20Hz (50ms) para procesar rápido la cola
+                Thread.sleep(50);
+                boolean uiRequiereUpdate = false;
+                String data;
+                // Drena la cola completamente antes de actualizar la UI
+                // Esto garantiza que el reloj avance a saltos exactos sin retrasos por acumulación
+                while ((data = cliente.leerString()) != null) {
+                    if (procesadorTelemetria.procesarDato(data, this)) {
+                        myHandler.post(this::sincronizarControles); // Handler nativo para tocar la UI
+                    }
+                    uiRequiereUpdate = true;
+                }
+                
+                if (uiRequiereUpdate) {
+                    myHandler.post(this::actualizarUI);
+                }
+            } catch (InterruptedException e) {
+                break;
+            }
+        }
+    }
+
+    @Override
+    protected void onRestart() {
+        super.onRestart();
+        // Cuando Android resume la app, el sistema puede haber matado el socket en segundo plano.
+        // Forzamos un reinicio de la conexión MQTT de forma segura.
+        if (cliente != null) {
+            AlmacenDatosRAM.conectado_PubSub = "Restaurando conexión MQTT...";
+            AlmacenDatosRAM.conectado = false;
+            cliente.desconectar();
+            myHandler.postDelayed(() -> {
+                if (!AlmacenDatosRAM.conectado) {
+                    cliente.conectar();
+                }
+            }, 1000);
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        threadRunning = false;
+        if (hilo != null) {
+            hilo.interrupt();
+        }
+        super.onDestroy();
+    }
+
+    private void actualizarUI() {
+        ui.gaugeSolAz.setMedida(AlmacenDatosRAM.sol_az);
+        ui.gaugeSolEl.setMedida(AlmacenDatosRAM.sol_el);
+        ui.gaugeServoAz.setMedida(AlmacenDatosRAM.servo_az); // Valor fiel
+        ui.gaugeServoEl.setMedida(AlmacenDatosRAM.servo_el); // Valor fiel
+
+        // --- SINCRONIZACIÓN AUTOMÁTICA DE CONTROLES (FEEDBACK) ---
+        long dt = System.currentTimeMillis() - lastManualInteractionTime;
+        
+        // 1. Sincronizar Sliders de Ubicación (GPS)
+        // Solo si NO hay intervención manual en GPS y ha pasado el tiempo de gracia
+        if (!intervencionGPS && dt > MANUAL_LOCKOUT_MS) {
+            int progLat = Math.round(AlmacenDatosRAM.lat * 100 + 9000);
+            int progLon = Math.round(AlmacenDatosRAM.lon * 100 + 18000);
+            if (ui.sliderLat.getProgress() != progLat) ui.sliderLat.setProgress(progLat);
+            if (ui.sliderLon.getProgress() != progLon) ui.sliderLon.setProgress(progLon);
+
+            if (Math.abs(ui.sliderTiempo.getValue() - AlmacenDatosRAM.factor_vel) > 0.01f) {
+                ui.sliderTiempo.setValue(AlmacenDatosRAM.factor_vel);
+            }
+        }
+
+        // 2. Sincronizar Sliders Manuales (Servo Feedback)
+        // Se sincronizan si ha pasado el tiempo de gracia (el usuario ya soltó el control)
+        if (dt > MANUAL_LOCKOUT_MS) {
+            intervencionServo = false; // Liberamos el flag para que reanuden la telemetría real
+            int targetAz = Math.round(AlmacenDatosRAM.servo_az + 90); // Mapeo visual
+            int targetEl = Math.round(AlmacenDatosRAM.servo_el);
+            
+            if (ui.sliderManualAz.getProgress() != targetAz)
+                ui.sliderManualAz.setProgress(targetAz);
+            
+            if (ui.sliderManualEl.getProgress() != targetEl)
+                ui.sliderManualEl.setProgress(targetEl);
+        }
+
+        ui.textviewFechaHora.setText(AlmacenDatosRAM.fecha + " " + AlmacenDatosRAM.hora + " | Modo: " + AlmacenDatosRAM.modo);
+        ui.textviewAviso.setText(AlmacenDatosRAM.conectado_PubSub);
+
+        // Actualizar Potencia Canal 1
+        ui.p1Inst.setText(String.format("Inst: %.4f mW", AlmacenDatosRAM.p1_inst));
+        ui.p1Avg.setText(String.format("Med: %.4f mW", AlmacenDatosRAM.p1_avg));
+        ui.p1Daily.setText(String.format("E: %.4f mWh", AlmacenDatosRAM.p1_avg_dia));
+
+        // Actualizar Potencia Canal 2
+        ui.p2Inst.setText(String.format("Inst: %.4f mW", AlmacenDatosRAM.p2_inst));
+        ui.p2Avg.setText(String.format("Med: %.4f mW", AlmacenDatosRAM.p2_avg));
+        ui.p2Daily.setText(String.format("E: %.4f mWh", AlmacenDatosRAM.p2_avg_dia));
+
+        // Cálculo Eficiencia
+        if (AlmacenDatosRAM.p2_avg > 0.001f) {
+            float ganancia = ((AlmacenDatosRAM.p1_avg_dia / AlmacenDatosRAM.p2_avg_dia) - 1) * 100;
+            ui.labelEficiencia.setText(String.format("Ganancia Móvil: %+.1f%%", ganancia));
+        } else {
+            ui.labelEficiencia.setText("Ganancia Móvil: --- %");
+        }
+
+        // Estado GPS
+        ui.labelEstadoGPS.setText(AlmacenDatosRAM.gps_valido ? "GPS: SEÑAL ESTABLE" : "GPS: BUSCANDO...");
+        ui.labelEstadoGPS.setTextColor(AlmacenDatosRAM.gps_valido ? Color.GREEN : Color.YELLOW);
+        
+        // Estabilidad y Sesión
+        long uptime = AlmacenDatosRAM.uptime_seg;
+        long h = uptime / 3600;
+        long m = (uptime % 3600) / 60;
+        long s = uptime % 60;
+        ui.textviewUptime.setText(String.format(Locale.getDefault(), "Uptime: %dh %02dm %02ds | Inicio: %s", 
+                h, m, s, AlmacenDatosRAM.inicio_sesion));
+
+        if (AlmacenDatosRAM.conectado) {
+            ui.botonConectar.setText("DESCONECTAR");
+            ui.botonBatch.setEnabled(true);
+        } else {
+            ui.botonConectar.setText("CONECTAR");
+            ui.botonBatch.setEnabled(false);
+        }
+
+        if (!AlmacenDatosRAM.registrosDatalogger.isEmpty()) {
+            ui.botonCompartir.setEnabled(true);
+        } else {
+            ui.botonCompartir.setEnabled(false);
+        }
+    }
+
+    @Override
+    public void onBackPressed() {
+        new DialogoSalir(this).mostrarPopMenuCoeficientes();
+    }
+}
