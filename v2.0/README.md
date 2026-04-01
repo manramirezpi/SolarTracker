@@ -36,11 +36,11 @@ Pantalla principal mostrando el seguimiento solar automático en modo GPS. La in
   <img src="./imagenes/app/06_monitoreo_nocturno.jpeg" width="30%" title="Monitoreo nocturno 24/7">
 </p>
 
-**Izquierda:** Aplicación iniciada al atardecer (17:28) — la ganancia mostrada (+284.8%) refleja solo la energía acumulada desde que se lanzó la app en un momento de ángulo solar rasante, donde el panel móvil captura proporcionalmente más radiación que el estático. **Esta no es la ganancia diaria total del sistema.**
+**Izquierda:** Sesión iniciada a las 12:35 (mediodía), captura tomada a las 17:28 (5h de monitoreo) — la ganancia mostrada (+284.8%) refleja solo la energía acumulada durante esas 5 horas. El valor alto se debe a que durante la tarde el ángulo solar rasante favorece significativamente al panel móvil sobre el estático. **Esta no es la ganancia diaria total del sistema.**
 
-**Centro:** Sesión de monitoreo durante el día (13:52) — ganancia acumulada desde el inicio de la sesión de +11.7%. El valor refleja las condiciones desde que se activó el monitoreo.
+**Centro:** Sesión iniciada a las 12:35, captura tomada a las 13:52 (1h 16m de monitoreo) — ganancia acumulada de +11.7% durante ese periodo. El valor refleja las condiciones desde que se activó el monitoreo.
 
-**Derecha:** Madrugada (01:13) — monitoreo continuo 24/7 con valores mínimos de radiación nocturna.
+**Derecha:** Sesión iniciada a las 12:35, captura tomada a las 01:13 de la madrugada (12h 38m de monitoreo continuo) — valores mínimos de radiación nocturna. Demuestra la capacidad de monitoreo 24/7 del sistema.
 
 > **Nota importante:** Los valores de ganancia mostrados dependen del momento de inicio de la aplicación y las condiciones particulares de radiación durante la sesión de monitoreo. No representan la ganancia total diaria del sistema, sino la comparativa desde el momento de inicialización hasta el momento actual.
 
